@@ -92,6 +92,8 @@ gradbot roster add <login> --roster roster.yml
 
 `GradBot practice/arrays/two_sum` and `GradBot --dev ./problems/arrays/two_sum` still work. `GradBot submit/...` does not clone hidden tests.
 
+Share [STUDENT.md](STUDENT.md) with students and [FACULTY.md](FACULTY.md) with faculty. The private course used to try both flows is [nvmaditya/gradbot-e2e](https://github.com/nvmaditya/gradbot-e2e). Practice problems for that course are in the public repo [nvmaditya/gradbot-course-samples](https://github.com/nvmaditya/gradbot-course-samples).
+
 One submit per student per problem. The lock is a git ref `refs/gradbot/slots/<slug>/<github-user-id>`. The id comes from GitHub's response to the login token. A login typed in the request is ignored. An account that is not on `roster.yml` is refused. Faculty `reset` is the only second chance.
 
 ---
