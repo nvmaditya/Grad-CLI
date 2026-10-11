@@ -1,0 +1,27 @@
+problem:
+  name: "Inorder Traversal"
+  topic: "Trees & Recursion"
+  difficulty: "intermediate"
+  description: >
+    Perform an inorder traversal of a binary search tree (BST).
+    
+    Input format:
+      Line 1: n (number of nodes)
+      Line 2: n space-separated integers to insert into BST (in order given)
+    
+    Output format:
+      Space-separated values from inorder traversal
+    
+    Example:
+      Input:  5\n4 2 6 1 3
+      Output: 1 2 3 4 6
+  languages: [python, c, cpp, java]
+  time_limit: 5
+  memory_limit_mb: 64
+
+scoring:
+  total_points: 4
+  pass_threshold: 0.6
+
+hints:
+  general: "Inorder traversal visits: left subtree, then root, then right subtree. For a BST, this gives sorted order!"

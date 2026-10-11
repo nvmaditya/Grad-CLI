@@ -1,0 +1,249 @@
+"""Submit rules: roster by GitHub user id, one slot ref, no hidden files in samples.
+
+No network. Callers pass an object with identity, create_ref, delete_ref, commit,
+and dispatch. The slot ref is created only after the roster check. A failed
+commit or dispatch deletes it. A finished grade does not.
+"""
+
+from __future__ import annotations
+
+import io
+import shutil
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+from gradbot.loader import public_bundle_files
+from gradbot.result import SuiteResult
+from gradbot.visibility import student_payload
+
+MAX_ZIP_BYTES = 1_048_576
+_ALLOWED_EXTENSIONS = {".py", ".c", ".h", ".cpp", ".cc", ".hpp", ".java"}
+
+WORKFLOW_TEXT = """\
+name: grade
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: Problem slug
+        required: true
+        type: string
+      user_id:
+        description: GitHub numeric user id
+        required: true
+        type: string
+      submission_path:
+        description: Path of the submission in the submissions repo
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grade-${{ inputs.user_id }}-${{ inputs.slug }}
+  cancel-in-progress: false
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out hidden tests
+        uses: actions/checkout@v4
+        with:
+          path: tests
+
+      - name: Check out the submission
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GRADBOT_SUBMISSIONS_REPO }}
+          token: ${{ secrets.GRADBOT_APP_TOKEN }}
+          path: submission
+
+      - name: Grade
+        env:
+          GITHUB_TOKEN: ""
+          GRADBOT_SANDBOX: docker
+        run: |
+          # docker run --rm --network none mounts only the solution directory.
+          # checks_hidden.py stays in this process and is not mounted into the container.
+          python -m gradbot dev "tests/${{ inputs.slug }}" --solution "submission/${{ inputs.submission_path }}" --sandbox docker --output faculty.json --student-output student.json
+"""
+
+
+class PolicyError(Exception):
+    """A submit or publish rule refused the request."""
+
+
+@dataclass(frozen=True, slots=True)
+class Identity:
+    user_id: int
+    login: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubmitResult:
+    accepted: bool
+    reason: str
+    user_id: int | None = None
+    login: str | None = None
+    ref: str | None = None
+    dispatched: bool = False
+
+
+def slot_ref(slug: str, user_id: int) -> str:
+    """Atomic lock key. The login string is not part of it."""
+    clean = slug.strip().strip("/")
+    return f"refs/gradbot/slots/{clean}/{user_id}"
+
+
+def status_comment(result: SuiteResult) -> str:
+    """Short student-visible grade. Hint stays. Cause and log do not."""
+    payload = student_payload(result)
+    lines = [
+        f"{payload['problem']}: {payload['passed_points']}/{payload['total_points']}"
+    ]
+    for check in payload["checks"]:
+        hint = check.get("hint") or ""
+        lines.append(f"{check['status']} {check['name']} {hint}".rstrip())
+    return "\n".join(lines)
+
+
+def device_code_body(client_id: str) -> dict:
+    """Device-flow body. read:user proves identity and cannot read private repos."""
+    return {"client_id": client_id, "scope": "read:user"}
+
+
+def student_can_read_private_repo(scope: str) -> bool:
+    return "repo" in scope.split()
+
+
+def credential_for(repo_role: str, student_token: str, app_token: str) -> str:
+    """Tests and submissions are read with the App token, never the student token."""
+    del student_token
+    if repo_role != "tests":
+        raise PolicyError(f"unknown repo role {repo_role}")
+    if not app_token:
+        raise PolicyError("tests repo requires the App token")
+    return app_token
+
+
+def parse_roster(text: str) -> set[int]:
+    data = yaml.safe_load(text) or {}
+    return {int(row["id"]) for row in (data.get("students") or [])}
+
+
+def add_roster_entry(text: str, login: str, user_id: int) -> str:
+    """Insert or replace one student. The numeric id is the key."""
+    data = yaml.safe_load(text) or {}
+    students = [
+        row for row in (data.get("students") or [])
+        if int(row["id"]) != int(user_id)
+    ]
+    students.append({"id": int(user_id), "login": login})
+    dumped = yaml.safe_dump({"students": students}, sort_keys=False)
+    return dumped
+
+
+def safe_source_files(data: bytes, max_bytes: int = MAX_ZIP_BYTES) -> dict[str, bytes]:
+    """Source files from a zip. Rejects path escape, hidden checks, and workflows."""
+    if not data:
+        raise PolicyError("empty zip")
+    if len(data) > max_bytes:
+        raise PolicyError("zip too large")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise PolicyError("bad zip") from exc
+
+    files: dict[str, bytes] = {}
+    for info in archive.infolist():
+        name = info.filename.replace("\\", "/")
+        if name.endswith("/"):
+            continue
+        parts = [part for part in name.split("/") if part != ""]
+        if (
+            not parts
+            or name.startswith("/")
+            or ".." in name.split("/")
+            or info.filename.startswith("/")
+        ):
+            raise PolicyError(f"unsafe path {info.filename}")
+        if ".." in parts or ".github" in parts or parts[-1] in {"checks_hidden.py", "checks.py"}:
+            raise PolicyError(f"refused {info.filename}")
+        if Path(parts[-1]).suffix.lower() not in _ALLOWED_EXTENSIONS:
+            continue
+        files["/".join(parts)] = archive.read(info)
+    if not files:
+        raise PolicyError("no source file")
+    return files
+
+
+def submit_once(
+    ops,
+    token: str,
+    slug: str,
+    files: dict[str, bytes],
+    roster: set[int],
+    body_login: str | None = None,
+) -> SubmitResult:
+    """One submit for (slug, user id). body_login is never read."""
+    del body_login
+    try:
+        ident = ops.identity(token)
+    except PolicyError:
+        return SubmitResult(False, "unknown token")
+    if ident.user_id not in roster:
+        return SubmitResult(False, "not on roster", ident.user_id, ident.login)
+    if not files:
+        return SubmitResult(False, "empty submission", ident.user_id, ident.login)
+
+    ref = slot_ref(slug, ident.user_id)
+    if not ops.create_ref(ref):
+        return SubmitResult(False, "already submitted", ident.user_id, ident.login, ref, False)
+    try:
+        ops.commit(slug, ident.user_id, ident.login, files)
+        ops.dispatch(slug, ident.user_id)
+    except Exception:
+        ops.delete_ref(ref)
+        return SubmitResult(False, "retry", ident.user_id, ident.login, ref, False)
+    return SubmitResult(True, "accepted", ident.user_id, ident.login, ref, True)
+
+
+def accept_zip(ops, token: str, slug: str, zip_bytes: bytes, roster: set[int], body_login: str | None = None) -> SubmitResult:
+    """Validate the zip before the slot ref exists."""
+    files = safe_source_files(zip_bytes)
+    return submit_once(ops, token, slug, files, roster, body_login)
+
+
+def reset_slot(ops, slug: str, user_id: int) -> None:
+    """Faculty second chance. Does not grade."""
+    ops.delete_ref(slot_ref(slug, user_id))
+
+
+def publish_suite(suite_dir: Path, tests_dir: Path, samples_dir: Path) -> None:
+    """Copy a problem. Hidden checks stay in the tests tree only."""
+    suite_dir = Path(suite_dir)
+    tests_dir = Path(tests_dir)
+    samples_dir = Path(samples_dir)
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    samples_dir.mkdir(parents=True, exist_ok=True)
+    for path in suite_dir.iterdir():
+        if not path.is_file() or path.name == "sample_solution":
+            continue
+        shutil.copy2(path, tests_dir / path.name)
+    for path in public_bundle_files(suite_dir):
+        shutil.copy2(path, samples_dir / path.name)
+
+
+def install_grader_workflow(tests_repo: Path) -> Path:
+    """Write the grader workflow into the private tests repo only."""
+    dest = Path(tests_repo) / ".github" / "workflows" / "grade.yml"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(WORKFLOW_TEXT, encoding="utf-8")
+    return dest

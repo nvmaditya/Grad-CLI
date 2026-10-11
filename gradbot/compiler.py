@@ -1,0 +1,452 @@
+"""
+Language detection and compilation for GradBot.
+
+Supports Python, C, C++, and Java. Compilation errors are translated
+into short student-facing messages — raw compiler output is only shown with ``--verbose``.
+"""
+
+from __future__ import annotations
+
+import glob
+import os
+import py_compile
+import re
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
+
+
+@dataclass(slots=True)
+class CompileResult:
+    """Result of compiling a student's solution."""
+
+    success: bool
+    language: str
+    binary_path: str | None = None        # path to the compiled binary / main script
+    error_output: str = ""                 # raw compiler error output
+    friendly_error: str = ""               # student-facing error message
+    source_files: list[str] = field(default_factory=list)
+
+
+# ── File extension → language mapping ──────────────────────────────────
+_EXTENSION_MAP: dict[str, str] = {
+    ".py": "python",
+    ".c": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".java": "java",
+}
+
+# Priority order when multiple languages are found
+_LANGUAGE_PRIORITY = ["python", "c", "cpp", "java"]
+
+
+def detect_language(solution_dir: Path) -> str | None:
+    """
+    Detect the programming language from files in the solution directory.
+
+    Scans for source files and returns the most likely language.
+    If multiple languages are found, follows priority order.
+
+    Args:
+        solution_dir: Path to the directory containing the student's code
+
+    Returns:
+        Language string ("python", "c", "cpp", "java") or None
+    """
+    found_languages: set[str] = set()
+
+    for file in solution_dir.iterdir():
+        if file.is_file():
+            ext = file.suffix.lower()
+            if ext in _EXTENSION_MAP:
+                found_languages.add(_EXTENSION_MAP[ext])
+
+    if not found_languages:
+        return None
+
+    # Return highest priority language found
+    for lang in _LANGUAGE_PRIORITY:
+        if lang in found_languages:
+            return lang
+
+    return None
+
+
+def _find_source_files(solution_dir: Path, language: str) -> list[Path]:
+    """Find all source files for a given language in the solution directory."""
+    ext_map = {
+        "python": [".py"],
+        "c": [".c"],
+        "cpp": [".cpp", ".cc", ".cxx"],
+        "java": [".java"],
+    }
+    extensions = ext_map.get(language, [])
+    files = []
+    for ext in extensions:
+        files.extend(solution_dir.glob(f"*{ext}"))
+    return sorted(files)
+
+
+def _extract_friendly_error(raw_error: str, language: str) -> str:
+    """
+    Extract a student-facing error message from raw compiler output.
+
+    Tries to find the first error and its line number, then wraps it
+    in a short message.
+    """
+    if not raw_error.strip():
+        return "Something went wrong during compilation, but there's no error message."
+
+    lines = raw_error.strip().splitlines()
+
+    # Try to extract first error with line number
+    line_num = None
+    error_msg = None
+
+    if language in ("c", "cpp"):
+        # GCC/Clang format: file.c:12:5: error: ...
+        for line in lines:
+            match = re.match(r".*?:(\d+):\d*:?\s*error:\s*(.+)", line)
+            if match:
+                line_num = match.group(1)
+                error_msg = match.group(2).strip()
+                break
+    elif language == "java":
+        # javac format: file.java:12: error: ...
+        for line in lines:
+            match = re.match(r".*?:(\d+):\s*error:\s*(.+)", line)
+            if match:
+                line_num = match.group(1)
+                error_msg = match.group(2).strip()
+                break
+    elif language == "python":
+        # Python syntax error: SyntaxError on line N
+        for line in lines:
+            match = re.search(r"line\s+(\d+)", line, re.IGNORECASE)
+            if match:
+                line_num = match.group(1)
+                # The actual error is typically the last line
+                error_msg = lines[-1].strip() if lines else None
+                break
+
+    if line_num and error_msg:
+        return (
+            f"Hmm, your code has an error on line {line_num}.\n"
+            f"The compiler says: {error_msg}\n"
+            f"Check that line and try again!"
+        )
+    elif line_num:
+        return (
+            f"Hmm, your code has an error on line {line_num}.\n"
+            f"Check that line and try again!"
+        )
+    else:
+        # Fallback — just show a summary
+        first_line = lines[0] if lines else "Unknown error"
+        return (
+            f"Your code couldn't compile.\n"
+            f"Here's a clue: {first_line}\n"
+            f"Double-check your code for typos or missing brackets!"
+        )
+
+
+def compile_solution(solution_dir: Path, language: str | None = None) -> CompileResult:
+    """
+    Compile the student's solution.
+
+    Args:
+        solution_dir: Path to the directory containing the student's code
+        language: Override language detection (if None, auto-detect)
+
+    Returns:
+        CompileResult with success status, binary path, and error info
+    """
+    solution_dir = Path(solution_dir).resolve()
+
+    if language is None:
+        language = detect_language(solution_dir)
+        if language is None:
+            return CompileResult(
+                success=False,
+                language="unknown",
+                friendly_error=(
+                    "GradBot couldn't find any code to check!\n"
+                    "Make sure your solution file is in the current directory.\n"
+                    "Supported file types: .py, .c, .cpp, .java"
+                ),
+            )
+
+    source_files = _find_source_files(solution_dir, language)
+    if not source_files:
+        return CompileResult(
+            success=False,
+            language=language,
+            friendly_error=(
+                f"GradBot found no {language} source files in this directory.\n"
+                "Make sure your solution file is here and has the right extension."
+            ),
+        )
+
+    source_names = [f.name for f in source_files]
+
+    # ── Dispatch to language-specific compilation ──────────────────
+    if language == "python":
+        return _compile_python(solution_dir, source_files, source_names)
+    elif language == "c":
+        return _compile_c(solution_dir, source_files, source_names)
+    elif language == "cpp":
+        return _compile_cpp(solution_dir, source_files, source_names)
+    elif language == "java":
+        return _compile_java(solution_dir, source_files, source_names)
+    else:
+        return CompileResult(
+            success=False,
+            language=language,
+            friendly_error=f"GradBot doesn't know how to compile {language} files yet.",
+        )
+
+
+def _compile_python(
+    solution_dir: Path, source_files: list[Path], source_names: list[str]
+) -> CompileResult:
+    """Syntax-check Python files using py_compile."""
+    errors = []
+    main_file = None
+
+    for src in source_files:
+        try:
+            py_compile.compile(str(src), doraise=True)
+        except py_compile.PyCompileError as e:
+            errors.append(str(e))
+
+        # Look for the main script
+        if main_file is None:
+            main_file = src
+
+    if errors:
+        raw = "\n".join(errors)
+        return CompileResult(
+            success=False,
+            language="python",
+            error_output=raw,
+            friendly_error=_extract_friendly_error(raw, "python"),
+            source_files=source_names,
+        )
+
+    return CompileResult(
+        success=True,
+        language="python",
+        binary_path=str(main_file),
+        source_files=source_names,
+    )
+
+
+def _compile_c(
+    solution_dir: Path, source_files: list[Path], source_names: list[str]
+) -> CompileResult:
+    """Compile C files using gcc."""
+    output_binary = solution_dir / "solution"
+    if os.name == "nt":
+        output_binary = solution_dir / "solution.exe"
+
+    cmd = [
+        "gcc",
+        *[str(f) for f in source_files],
+        "-o", str(output_binary),
+        "-lm",
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(solution_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return CompileResult(
+            success=False,
+            language="c",
+            friendly_error=(
+                "GradBot couldn't find the C compiler (gcc).\n"
+                "Ask your teacher to install GCC on this computer."
+            ),
+            source_files=source_names,
+        )
+    except subprocess.TimeoutExpired:
+        return CompileResult(
+            success=False,
+            language="c",
+            friendly_error="Compilation took too long — that shouldn't happen!",
+            source_files=source_names,
+        )
+
+    if result.returncode != 0:
+        raw = result.stderr
+        return CompileResult(
+            success=False,
+            language="c",
+            error_output=raw,
+            friendly_error=_extract_friendly_error(raw, "c"),
+            source_files=source_names,
+        )
+
+    return CompileResult(
+        success=True,
+        language="c",
+        binary_path=str(output_binary),
+        source_files=source_names,
+    )
+
+
+def _compile_cpp(
+    solution_dir: Path, source_files: list[Path], source_names: list[str]
+) -> CompileResult:
+    """Compile C++ files using g++."""
+    output_binary = solution_dir / "solution"
+    if os.name == "nt":
+        output_binary = solution_dir / "solution.exe"
+
+    cmd = [
+        "g++",
+        *[str(f) for f in source_files],
+        "-o", str(output_binary),
+        "-std=c++17",
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(solution_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return CompileResult(
+            success=False,
+            language="cpp",
+            friendly_error=(
+                "GradBot couldn't find the C++ compiler (g++).\n"
+                "Ask your teacher to install G++ on this computer."
+            ),
+            source_files=source_names,
+        )
+    except subprocess.TimeoutExpired:
+        return CompileResult(
+            success=False,
+            language="cpp",
+            friendly_error="Compilation took too long — that shouldn't happen!",
+            source_files=source_names,
+        )
+
+    if result.returncode != 0:
+        raw = result.stderr
+        return CompileResult(
+            success=False,
+            language="cpp",
+            error_output=raw,
+            friendly_error=_extract_friendly_error(raw, "cpp"),
+            source_files=source_names,
+        )
+
+    return CompileResult(
+        success=True,
+        language="cpp",
+        binary_path=str(output_binary),
+        source_files=source_names,
+    )
+
+
+def _compile_java(
+    solution_dir: Path, source_files: list[Path], source_names: list[str]
+) -> CompileResult:
+    """Compile Java files using javac."""
+    cmd = ["javac", *[str(f) for f in source_files]]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(solution_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return CompileResult(
+            success=False,
+            language="java",
+            friendly_error=(
+                "GradBot couldn't find the Java compiler (javac).\n"
+                "Ask your teacher to install the JDK on this computer."
+            ),
+            source_files=source_names,
+        )
+    except subprocess.TimeoutExpired:
+        return CompileResult(
+            success=False,
+            language="java",
+            friendly_error="Compilation took too long — that shouldn't happen!",
+            source_files=source_names,
+        )
+
+    if result.returncode != 0:
+        raw = result.stderr
+        return CompileResult(
+            success=False,
+            language="java",
+            error_output=raw,
+            friendly_error=_extract_friendly_error(raw, "java"),
+            source_files=source_names,
+        )
+
+    # Find the main class — look for a class with main method
+    main_class = _find_java_main_class(solution_dir, source_files)
+
+    return CompileResult(
+        success=True,
+        language="java",
+        binary_path=main_class,
+        source_files=source_names,
+    )
+
+
+def _find_java_main_class(solution_dir: Path, source_files: list[Path]) -> str | None:
+    """Find the Java class containing the main method."""
+    for src in source_files:
+        content = src.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"public\s+static\s+void\s+main\s*\(", content):
+            return src.stem  # Class name = filename without .java
+    # Fallback: use first file
+    if source_files:
+        return source_files[0].stem
+    return None
+
+
+def get_run_command(compile_result: CompileResult) -> list[str]:
+    """
+    Get the command to run the compiled student solution.
+
+    Args:
+        compile_result: The result from compile_solution()
+
+    Returns:
+        Command as a list of strings suitable for subprocess.run()
+    """
+    if not compile_result.success or not compile_result.binary_path:
+        return []
+
+    lang = compile_result.language
+
+    if lang == "python":
+        return ["python", compile_result.binary_path]
+    elif lang in ("c", "cpp"):
+        return [compile_result.binary_path]
+    elif lang == "java":
+        return ["java", compile_result.binary_path]
+    else:
+        return []

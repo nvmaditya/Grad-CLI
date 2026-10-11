@@ -1,0 +1,27 @@
+problem:
+  name: "Merge Sort"
+  topic: "Sorting & Searching"
+  difficulty: "intermediate"
+  description: >
+    Implement merge sort and print the sorted array.
+    
+    Input format:
+      Line 1: n (number of elements)
+      Line 2: n space-separated integers
+    
+    Output format:
+      Space-separated integers in sorted (ascending) order
+    
+    Example:
+      Input:  5\n5 3 1 4 2
+      Output: 1 2 3 4 5
+  languages: [python, c, cpp, java]
+  time_limit: 5
+  memory_limit_mb: 64
+
+scoring:
+  total_points: 4
+  pass_threshold: 0.6
+
+hints:
+  general: "Merge sort works by dividing the array in half, sorting each half, then merging them back together."

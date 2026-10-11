@@ -1,0 +1,25 @@
+problem:
+  name: "Two Sum"
+  topic: "Arrays & Strings"
+  difficulty: "beginner"
+  description: >
+    Given an array of integers and a target sum, return the indices
+    of the two numbers that add up to the target.
+    
+    Input format:
+      Line 1: n (number of elements)
+      Line 2: n space-separated integers
+      Line 3: target sum
+    
+    Output format:
+      Two space-separated indices (0-indexed)
+  languages: [python, c, cpp, java]
+  time_limit: 5
+  memory_limit_mb: 64
+
+scoring:
+  total_points: 4
+  pass_threshold: 0.6
+
+hints:
+  general: "Think about what data structure lets you look up values instantly."
