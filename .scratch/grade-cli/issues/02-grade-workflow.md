@@ -4,8 +4,8 @@
 
 **Blocked by:** 01 — Roster rows and assignment tests
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The workflow text contains no Pages host.
-- [ ] The checkout of the student commit is the only step that names the faculty token.
-- [ ] The grade step clears the faculty token, `GITHUB_TOKEN`, and `GRADBOT_APP_TOKEN` before the grader runs.
+- [x] The workflow text contains no Pages host.
+- [x] The checkout of the student commit is the only step that names the faculty token.
+- [x] The grade step clears the faculty token, `GITHUB_TOKEN`, and `GRADBOT_APP_TOKEN` before the grader runs.
