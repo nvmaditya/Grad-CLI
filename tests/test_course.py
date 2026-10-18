@@ -61,6 +61,17 @@ def test_course_add_from_the_cli(tmp_path: Path, capsys):
     assert "Created" in capsys.readouterr().out
 
 
+def test_roster_refuses_a_classroom_outside_the_course(tmp_path: Path):
+    outside = tmp_path / "outside"
+    add_classroom(outside, "cs-fall", "CS Fall")
+    root = tmp_path / "root"
+    root.mkdir()
+    with pytest.raises(CourseError):
+        add_roster_row(root, str(outside / "cs-fall"), 42, "ada")
+    text = (outside / "cs-fall" / "roster.csv").read_text(encoding="utf-8")
+    assert text.splitlines() == ["github_id,username,email,first_name,last_name,section,role"]
+
+
 def test_roster_row_records_the_student(tmp_path: Path):
     add_classroom(tmp_path, "cs-fall", "CS Fall")
     add_roster_row(tmp_path, "cs-fall", 42, "ada", "student")

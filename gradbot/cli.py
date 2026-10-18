@@ -675,7 +675,7 @@ def _cmd_assignment(argv: list[str]) -> None:
 
 
 def _cmd_roster(argv: list[str]) -> None:
-    parser = argparse.ArgumentParser(prog="gradbot roster")
+    parser = argparse.ArgumentParser(prog="grade roster")
     parser.add_argument("action", choices=["add"])
     parser.add_argument("login")
     parser.add_argument("--roster", required=True)

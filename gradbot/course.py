@@ -85,13 +85,18 @@ def add_roster_row(
 
 
 def add_assignment(root: Path, classroom: str, slug: str, name: str) -> None:
-    folder = root / classroom
+    folder = _classroom_dir(root, classroom)
     path = folder / "assignments.json"
     if not path.is_file():
         raise CourseError(f"no classroom {classroom}")
-    classroom_slug = json.loads((folder / "classroom.json").read_text(encoding="utf-8"))["slug"]
-    room = len(classroom_slug) + 1
-    validate_slug(slug, limit=MAX_REPO_PREFIX - room)
+    try:
+        classroom_slug = json.loads((folder / "classroom.json").read_text(encoding="utf-8"))["slug"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise CourseError(f"no classroom {classroom}") from exc
+    if not isinstance(classroom_slug, str):
+        raise CourseError(f"no classroom {classroom}")
+    prefix = len(classroom_slug) + 1
+    validate_slug(slug, limit=MAX_REPO_PREFIX - prefix)
     title = name.strip()
     if not title:
         raise CourseError("name is required")
@@ -134,6 +139,7 @@ def add_test(root: Path, classroom: str, assignment: str, test: dict) -> None:
 
 
 def _classroom_dir(root: Path, classroom: str) -> Path:
+    validate_slug(classroom)
     folder = root / classroom
     if not (folder / "classroom.json").is_file():
         raise CourseError(f"no classroom {classroom}")
