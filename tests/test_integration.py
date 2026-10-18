@@ -59,7 +59,7 @@ class TestTwoSum:
             f"Expected perfect score, got {result.score}. "
             f"Failed: {[c.name for c in result.checks if not c.passed]}"
         )
-        assert "GradBot" in output
+        assert "Grade" in output
         assert "✓" in output
 
 

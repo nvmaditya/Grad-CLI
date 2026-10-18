@@ -168,7 +168,7 @@ def render(
 
     # ── Header ─────────────────────────────────────────────────────
     lines.append("")
-    title = f"GradBot — {suite_result.topic}: {suite_result.problem}"
+    title = f"Grade — {suite_result.topic}: {suite_result.problem}"
     lines.append(c.bold_white(title))
     lines.append(c.dim("─" * max(45, len(title) + 4)))
     lines.append("")
@@ -282,7 +282,7 @@ def render_compile_error(
 
     lines: list[str] = []
     lines.append("")
-    lines.append(c.bold_white("GradBot — Compilation"))
+    lines.append(c.bold_white("Grade — Compilation"))
     lines.append(c.dim("─" * 45))
     lines.append("")
     lines.append(c.red(f"  ✗  {friendly_error}"))

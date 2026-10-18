@@ -99,7 +99,7 @@ class TestRender:
         buf = io.StringIO()
         render(suite, stream=buf, no_color=True)
         output = buf.getvalue()
-        assert "GradBot" in output
+        assert "Grade" in output
         assert "Test Problem" in output
 
     def test_shows_pass_symbol(self):

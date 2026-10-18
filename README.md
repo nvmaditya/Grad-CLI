@@ -1,8 +1,10 @@
-# GradBot
+# Grade CLI
 
-**A CLI grading tool for coding-cohort students, mainly for DSA and competitive programming.**
+**Free course grading on a free GitHub organization.**
 
-Students write a solution, then run `GradBot` in the terminal. Practice mode shows the tests. Submit mode shows pass or fail plus a hint, and keeps the hidden cases hidden. Compiler errors name the line. Raw compiler output stays behind `--verbose`.
+The command is `grade`. `GradBot` starts the same program. Practice mode shows the tests. Submit mode shows pass or fail plus a hint, and keeps the hidden cases hidden. Compiler errors name the line. Raw compiler output stays behind `--verbose`.
+
+Course files live in a `gradecli/` directory (`grade course add`, `grade assignment add`). That layout does not use GitHub Team, GitHub Enterprise, or GitHub Pages. Grading is meant to run as a reusable workflow inside the organization, on the free plan's included Actions minutes, with a $0 spending cap.
 
 ---
 
@@ -42,7 +44,7 @@ GradBot practice/arrays/two_sum
 You'll see output like:
 
 ```
-GradBot — Arrays & Strings: Two Sum
+Grade — Arrays & Strings: Two Sum
 ─────────────────────────────────────────────
 
   ✓  Basic case: [2,7,11,15], target=9        (1 pt)
@@ -194,4 +196,4 @@ GradBot --dev ./problems/arrays/two_sum --solution ./problems/arrays/two_sum/sam
 
 ## License
 
-MIT
+GPL-3.0-only. See [LICENSE](LICENSE).

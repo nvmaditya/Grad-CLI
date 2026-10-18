@@ -21,7 +21,10 @@ from pathlib import Path
 
 from gradbot import __version__
 
-_COMMANDS = {"login", "run", "submit", "dev", "publish", "results", "reset", "roster"}
+_COMMANDS = {
+    "login", "run", "submit", "dev", "publish", "results", "reset", "roster",
+    "course", "assignment",
+}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -31,7 +34,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             _dispatch(raw)
         except KeyboardInterrupt:
-            print("\n\nGradBot cancelled. See you next time! 👋")
+            print("\n\nGrade cancelled. See you next time! 👋")
             sys.exit(130)
         except SystemExit:
             raise
@@ -51,7 +54,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         _run(args)
     except KeyboardInterrupt:
-        print("\n\nGradBot cancelled. See you next time! 👋")
+        print("\n\nGrade cancelled. See you next time! 👋")
         sys.exit(130)
     except SystemExit:
         raise
@@ -63,11 +66,10 @@ def main(argv: list[str] | None = None) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="GradBot",
+        prog="grade",
         description=(
-            "GradBot — Your friendly coding checker!\n\n"
-            "Run GradBot to check your solution against test cases.\n"
-            "Example: GradBot practice/arrays/two_sum"
+            "Grade CLI — check a solution on a free GitHub organization.\n\n"
+            "Example: grade practice/arrays/two_sum"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -127,7 +129,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Development mode: treat slug as a local path to a problem suite.\n"
             "Runs checks.py and checks_hidden.py.\n"
-            "Example: GradBot --dev ./problems/arrays/two_sum"
+            "Example: grade --dev ./problems/arrays/two_sum"
         ),
     )
 
@@ -147,7 +149,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"GradBot {__version__}",
+        version=f"Grade CLI {__version__}",
     )
 
     return parser
@@ -218,8 +220,8 @@ def _run(args: argparse.Namespace) -> None:
 
 def _handle_fatal_error(error: Exception, verbose: bool = False) -> None:
     """Handle unexpected errors gracefully — never show raw tracebacks to students."""
-    print("\n❌ Oops! GradBot ran into an unexpected problem.")
-    print("   This isn't your fault — it's a bug in GradBot.")
+    print("\n❌ Oops! Grade ran into an unexpected problem.")
+    print("   This isn't your fault — it's a bug in Grade.")
     print("   Please tell your teacher what happened.\n")
 
     if verbose:
@@ -408,6 +410,12 @@ def _dispatch(argv: list[str]) -> None:
         return
     if cmd == "roster":
         _cmd_roster(argv[1:])
+        return
+    if cmd == "course":
+        _cmd_course(argv[1:])
+        return
+    if cmd == "assignment":
+        _cmd_assignment(argv[1:])
         return
     print(f"❌ Unknown command {cmd}")
     sys.exit(2)
@@ -601,6 +609,69 @@ def _cmd_reset(argv: list[str]) -> None:
     )
     print(response or "deleted")
     sys.exit(0 if status in (200, 204) else 1)
+
+
+def _cmd_course(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="grade course")
+    sub = parser.add_subparsers(dest="action", required=True)
+    add = sub.add_parser("add")
+    add.add_argument("slug")
+    add.add_argument("--name", required=True)
+    add.add_argument("--root", default="gradecli")
+    roster = sub.add_parser("roster-add")
+    roster.add_argument("slug")
+    roster.add_argument("--id", required=True, type=int)
+    roster.add_argument("--username", required=True)
+    roster.add_argument("--role", default="student")
+    roster.add_argument("--root", default="gradecli")
+    args = parser.parse_args(argv)
+    from gradbot.course import CourseError, add_classroom, add_roster_row
+    try:
+        if args.action == "add":
+            path = add_classroom(Path(args.root), args.slug, args.name)
+            print(f"Created {path}")
+        else:
+            add_roster_row(Path(args.root), args.slug, args.id, args.username, args.role)
+            print(f"Added {args.username} to {args.slug}")
+    except CourseError as exc:
+        print(f"❌ {exc}")
+        sys.exit(1)
+
+
+def _cmd_assignment(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="grade assignment")
+    sub = parser.add_subparsers(dest="action", required=True)
+    add = sub.add_parser("add")
+    add.add_argument("classroom")
+    add.add_argument("slug")
+    add.add_argument("--name", required=True)
+    add.add_argument("--root", default="gradecli")
+    test_add = sub.add_parser("test-add")
+    test_add.add_argument("classroom")
+    test_add.add_argument("slug")
+    test_add.add_argument("--name", required=True)
+    test_add.add_argument("--type", required=True, dest="test_type")
+    test_add.add_argument("--points", required=True, type=int)
+    test_add.add_argument("--run", default=None)
+    test_add.add_argument("--expected", default=None)
+    test_add.add_argument("--root", default="gradecli")
+    args = parser.parse_args(argv)
+    from gradbot.course import CourseError, add_assignment, add_test
+    try:
+        if args.action == "add":
+            add_assignment(Path(args.root), args.classroom, args.slug, args.name)
+            print(f"Added {args.classroom}/{args.slug}")
+        else:
+            body = {"name": args.name, "type": args.test_type, "points": args.points}
+            if args.run is not None:
+                body["run"] = args.run
+            if args.expected is not None:
+                body["expected"] = args.expected
+            add_test(Path(args.root), args.classroom, args.slug, body)
+            print(f"Added test {args.name}")
+    except CourseError as exc:
+        print(f"❌ {exc}")
+        sys.exit(1)
 
 
 def _cmd_roster(argv: list[str]) -> None:

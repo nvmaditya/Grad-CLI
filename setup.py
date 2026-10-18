@@ -1,4 +1,4 @@
-"""GradBot — CLI grading tool for cohort DSA and competitive programming."""
+"""Grade CLI — free course grading on a free GitHub organization."""
 
 from setuptools import setup, find_packages
 from pathlib import Path
@@ -6,16 +6,16 @@ from pathlib import Path
 try:
     long_description = (Path(__file__).parent / "README.md").read_text(encoding="utf-8")
 except FileNotFoundError:
-    long_description = "GradBot — A CLI grading tool for cohort DSA and competitive programming"
+    long_description = "Grade CLI — free course grading on a free GitHub organization"
 
 setup(
-    name="gradbot",
+    name="grade-cli",
     version="1.0.0",
-    description="A CLI grading tool for coding-cohort students, mainly DSA and competitive programming",
+    description="Free course grading on a free GitHub organization",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="GradBot Team",
-    license="MIT",
+    license="GPL-3.0-only",
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
@@ -31,13 +31,14 @@ setup(
     },
     entry_points={
         "console_scripts": [
+            "grade = gradbot.cli:main",
             "GradBot = gradbot.cli:main",
         ],
     },
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Education",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
