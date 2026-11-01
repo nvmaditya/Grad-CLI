@@ -110,6 +110,36 @@ def test_python_entry_point_is_the_only_file_with_a_main_guard(tmp_path):
     assert Path(result.binary_path).name == "run.py"
 
 
+def test_a_helper_that_only_mentions_main_is_not_the_entry_point(tmp_path):
+    (tmp_path / "prog.py").write_text("print(1)\n", encoding="utf-8")
+    (tmp_path / "util.py").write_text(
+        '"""Helpers. Not meant to run as __main__."""\nimport sys\nsys.exit(3)\n', encoding="utf-8",
+    )
+    result = compile_solution(tmp_path)
+    assert not result.success
+    assert "Name the file to run solution.py" in result.friendly_error
+
+
+def test_the_main_guard_wins_over_a_helper_that_mentions_main(tmp_path):
+    (tmp_path / "util.py").write_text("# run.py is the __main__ program\nX = 1\n", encoding="utf-8")
+    (tmp_path / "run.py").write_text("if __name__ == '__main__':\n    print(1)\n", encoding="utf-8")
+    assert Path(compile_solution(tmp_path).binary_path).name == "run.py"
+
+
+def test_a_main_guard_written_the_other_way_round_counts(tmp_path):
+    (tmp_path / "lib.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "go.py").write_text("if '__main__' == __name__:\n    print(1)\n", encoding="utf-8")
+    assert Path(compile_solution(tmp_path).binary_path).name == "go.py"
+
+
+def test_a_main_guard_inside_a_function_does_not_count(tmp_path):
+    (tmp_path / "a.py").write_text("print(1)\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text(
+        "def f():\n    if __name__ == '__main__':\n        print(2)\n", encoding="utf-8",
+    )
+    assert not compile_solution(tmp_path).success
+
+
 def test_java_main_class_is_the_file_with_main(tmp_path):
     helper = tmp_path / "Helper.java"
     main = tmp_path / "Main.java"

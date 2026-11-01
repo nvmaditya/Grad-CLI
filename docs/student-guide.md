@@ -91,7 +91,7 @@ GradBot works out the language from the file extension:
 
 | Language | Files | Runs |
 |---|---|---|
-| Python | `.py` | `solution.py`, else `main.py`, else the only `.py` file |
+| Python | `.py` | `solution.py`, else `main.py`, else the only `.py` file, else the only file with a top-level `if __name__ == "__main__":` |
 | C | `.c` | `gcc` (all `.c` files together) |
 | C++ | `.cpp`, `.cc`, `.cxx` | `g++ -std=c++17` |
 | Java | `.java` | `javac`, then the class with `public static void main` |

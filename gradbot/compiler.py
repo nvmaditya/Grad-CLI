@@ -7,6 +7,7 @@ into short student-facing messages — raw compiler output is only shown with ``
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
@@ -220,20 +221,38 @@ _PYTHON_ENTRY_NAMES = ("solution.py", "main.py")
 
 
 def _python_entry_point(source_files: list[Path]) -> Path | None:
-    """Pick the file to run: solution.py, main.py, the only file, or the only __main__ guard."""
+    """Pick the file to run: solution.py, main.py, the only file, or the only main guard."""
     by_name = {f.name: f for f in source_files}
     for name in _PYTHON_ENTRY_NAMES:
         if name in by_name:
             return by_name[name]
     if len(source_files) == 1:
         return source_files[0]
-    guarded = [
-        f for f in source_files
-        if "__main__" in f.read_text(encoding="utf-8", errors="replace")
-    ]
+    guarded = [f for f in source_files if _has_main_guard(f)]
     if len(guarded) == 1:
         return guarded[0]
     return None
+
+
+def _has_main_guard(path: Path) -> bool:
+    """True if the file has a top-level ``if __name__ == "__main__":``.
+
+    Parsed, not searched: a comment or string that mentions __main__ does not count.
+    """
+    try:
+        tree = ast.parse(path.read_bytes())
+    except (SyntaxError, ValueError):
+        return False
+    for node in tree.body:
+        test = node.test if isinstance(node, ast.If) else None
+        if not (isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)):
+            continue
+        sides = (test.left, test.comparators[0])
+        if any(isinstance(n, ast.Name) and n.id == "__name__" for n in sides) and any(
+            isinstance(n, ast.Constant) and n.value == "__main__" for n in sides
+        ):
+            return True
+    return False
 
 
 def _compile_python(
