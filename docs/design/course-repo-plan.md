@@ -13,7 +13,7 @@
 - License stays `GPL-3.0-only`. New files get the SPDX line `GPL-3.0-only`.
 - Do not copy source from `foundation50/classroom50`. Read behavior, write new code.
 - Product name is Grade CLI. Command is `grade`. Python import stays `gradbot`.
-- Disk folder stays `C:\Code\GradBot\gradbot` until the user renames it outside this session.
+- Disk folder stays `the existing project folder` until the user renames it outside this session.
 - GitHub Free organization only. Do not call any URL containing `/pages`. Do not require `plan.name` of `team` or `enterprise`.
 - Actions spending limit is `0` dollars. Included private minutes are the free 2,000. A spike stops jobs.
 - Default submission mode stays `tag`. One grade per student per assignment.

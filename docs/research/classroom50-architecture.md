@@ -4,8 +4,8 @@ Research date: 2026-10-18. Sources are the local clones and the live GitHub READ
 
 | Source | What was read |
 | --- | --- |
-| `C:\Users\chhav\AppData\Local\Temp\classroom50` | `origin` `https://github.com/foundation50/classroom50.git`, branch `main`, commit `48c1e9b0dafaecaf5312532c1a7fd40ce7de874d` (2026-10-14, `chore: release main (#1118)`) |
-| `C:\Users\chhav\AppData\Local\Temp\classroom50-wiki` | `origin` `https://github.com/foundation50/classroom50.wiki.git`, branch `master`, commit `7ce8b082405dbe4fbd5211064388cfea10350555` (2026-10-14, `Sync from foundation50/classroom50@e268b5c`) |
+| `<classroom50 clone>` | `origin` `https://github.com/foundation50/classroom50.git`, branch `main`, commit `48c1e9b0dafaecaf5312532c1a7fd40ce7de874d` (2026-10-14, `chore: release main (#1118)`) |
+| `<classroom50-wiki clone>` | `origin` `https://github.com/foundation50/classroom50.wiki.git`, branch `master`, commit `7ce8b082405dbe4fbd5211064388cfea10350555` (2026-10-14, `Sync from foundation50/classroom50@e268b5c`) |
 | In-repo wiki vs wiki clone | Every file under `classroom50\wiki` hashes equal to the wiki clone (no content drift) |
 | Live README | https://github.com/foundation50/classroom50 matches the cloned `README.md` |
 
@@ -13,11 +13,11 @@ Research date: 2026-10-18. Sources are the local clones and the live GitHub READ
 
 ## 1. What the product is
 
-Classroom 50 is a free, GPLv3 tool from the Fifty Foundation for creating programming assignments, optional autograded correctness tests, and submission tracking on GitHub, positioned as an open-source alternative to GitHub Classroom ([README](https://github.com/foundation50/classroom50/blob/main/README.md), `C:\Users\chhav\AppData\Local\Temp\classroom50\README.md`, `C:\Users\chhav\AppData\Local\Temp\classroom50\LICENSE`, wiki `Home.md`). Teachers and students use either the static web app at https://classroom50.org or the `gh teacher` / `gh student` GitHub CLI extensions. It has no Classroom 50 server, database, or account system: the web app is a GitHub Pages site that runs in the browser, the CLIs run on the user's machine, and classrooms, rosters, assignments, scores, enrollment, and permissions are ordinary GitHub organization data plus files in a private `classroom50` repository in the teacher's organization (`C:\Users\chhav\AppData\Local\Temp\classroom50-wiki\Home.md`, `How-Classroom-50-Works.md`).
+Classroom 50 is a free, GPLv3 tool from the Fifty Foundation for creating programming assignments, optional autograded correctness tests, and submission tracking on GitHub, positioned as an open-source alternative to GitHub Classroom ([README](https://github.com/foundation50/classroom50/blob/main/README.md), `<classroom50 clone>\README.md`, `<classroom50 clone>\LICENSE`, wiki `Home.md`). Teachers and students use either the static web app at https://classroom50.org or the `gh teacher` / `gh student` GitHub CLI extensions. It has no Classroom 50 server, database, or account system: the web app is a GitHub Pages site that runs in the browser, the CLIs run on the user's machine, and classrooms, rosters, assignments, scores, enrollment, and permissions are ordinary GitHub organization data plus files in a private `classroom50` repository in the teacher's organization (`<classroom50-wiki clone>\Home.md`, `How-Classroom-50-Works.md`).
 
 ## 2. Wiki page map
 
-Pages below are the Markdown files in `C:\Users\chhav\AppData\Local\Temp\classroom50-wiki` (same bytes as `C:\Users\chhav\AppData\Local\Temp\classroom50\wiki`). Titles are the H1 of each file. `_Sidebar.md` is navigation chrome, not a guide. `Home.md` also links two training PDFs under `slides/`; those are files, not wiki pages.
+Pages below are the Markdown files in `<classroom50-wiki clone>` (same bytes as `<classroom50 clone>\wiki`). Titles are the H1 of each file. `_Sidebar.md` is navigation chrome, not a guide. `Home.md` also links two training PDFs under `slides/`; those are files, not wiki pages.
 
 | Page | Purpose |
 | --- | --- |
@@ -103,7 +103,7 @@ GitHub is the store (`How-Classroom-50-Works.md`):
 | Email invite before accept | Secret team `invite-<hash>` plus a pending `roster.csv` row. Sync deletes the team after accept (`How-Classroom-50-Works.md`). |
 | Student repo name | `<classroom>-<assignment>-<username>`, lowercased. Team-mode group repo: `<classroom>-<assignment>-group-<n>`. Group team slug: `classroom50-group-<16-hex>-<n>` (`How-Classroom-50-Works.md`). |
 
-Other JSON Schemas in `C:\Users\chhav\AppData\Local\Temp\classroom50\schemas`, not expanded here: `classroom-team-v1`, `group-team-v1`, `invite-v1`, `results-v1`, `tests-v1`.
+Other JSON Schemas in `<classroom50 clone>\schemas`, not expanded here: `classroom-team-v1`, `group-team-v1`, `invite-v1`, `results-v1`, `tests-v1`.
 
 What Pages publishes is an allow-list, and it is world-readable (or only obscured, for an unlisted classroom). `publish-pages.yaml` copies `runner.py`, `ensure_feedback_pr.py`, each `classroom.json` and `assignments.json`, default `autograder.py`, non-default `autograders/*.yaml`, and per-assignment `autograders/<slug>.tar.gz` (including materialized `tests.json`). It also writes `classrooms-index.json` with only `schema`, `name`, `short_name`, `term`, `org`, `active`, and `migrated_from`. Roster-only commits do not redeploy, and `roster.csv` is not in the allow-list. `scores.json` is not in the allow-list either, so the gradebook stays in the private repo and is read through the API. An unlisted `secret` only changes the URL path; the schema calls that obscurity, not access control (`publish-pages.yaml`, `classroom-v1.schema.json`).
 
