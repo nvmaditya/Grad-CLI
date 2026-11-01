@@ -167,7 +167,8 @@ def test_expect_output_exact_mismatch_carries_expected_and_actual():
         expect_output("1 0", "0 1")
     assert raised.value.expected == "0 1"
     assert raised.value.actual == "1 0"
-    assert raised.value.hint == "Your output doesn't match what was expected. Check the format!"
+    assert raised.value.hint is None
+    assert raised.value.default_hint == "Your output doesn't match what was expected. Check the format!"
 
 
 def test_expect_output_custom_hint_replaces_the_default():
@@ -269,4 +270,4 @@ def test_invalid_utf8_output_is_a_student_failure_not_a_grader_error(tmp_path):
     outcome = _grade(tmp_path, "import sys\nsys.stdout.buffer.write(b'\\xff\\xfe\\n')\n", check)
 
     assert outcome.status == "fail"
-    assert outcome.hint == "Your output doesn't match what was expected. Check the format!"
+    assert outcome.hint == "author hint"

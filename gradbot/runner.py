@@ -170,7 +170,9 @@ def _run_single_check(
 
             except api.CheckFailure as e:
                 elapsed_ms = (time.perf_counter_ns() - start_time) // 1_000_000
-                hint = e.hint or check.hint or "Try reviewing your approach!"
+                # The hint passed to the failing call, then the check's own
+                # hint, then the generic one for that kind of failure.
+                hint = e.hint or check.hint or e.default_hint or "Try reviewing your approach!"
 
                 log_lines.append(f"CheckFailure: {e}")
                 if hasattr(e, "expected") and e.expected is not None:

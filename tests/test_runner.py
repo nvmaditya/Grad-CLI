@@ -198,3 +198,57 @@ class TestAssertionMessages:
         )
 
         assert result.checks[0].hint == "Check the order"
+
+
+class TestHintPrecedence:
+    """A hint passed to the failing call beats the check's hint, which beats the generic one."""
+
+    def _hint(self, tmp_path, func, check_hint=None):
+        result = run_suite(
+            _make_config(),
+            [CheckFunction(func=func, name="c", slug="c", hint=check_hint)],
+            tmp_path,
+            _make_compile_result(binary_path=str(tmp_path / "solution.py")),
+            "practice",
+        )
+        return result.checks[0].hint
+
+    def test_check_hint_is_shown_for_an_output_mismatch(self, tmp_path):
+        import gradbot
+
+        def check():
+            gradbot.expect_output("1 0", "0 1")
+
+        assert self._hint(tmp_path, check, "Try every pair") == "Try every pair"
+
+    def test_hint_given_to_expect_output_wins(self, tmp_path):
+        import gradbot
+
+        def check():
+            gradbot.expect_output("1 0", "0 1", hint="Indexes are 0-based")
+
+        assert self._hint(tmp_path, check, "Try every pair") == "Indexes are 0-based"
+
+    def test_generic_hint_when_nobody_wrote_one(self, tmp_path):
+        import gradbot
+
+        def check():
+            gradbot.expect_output("1 0", "0 1")
+
+        assert self._hint(tmp_path, check) == "Your output doesn't match what was expected. Check the format!"
+
+    def test_check_hint_is_shown_for_sequence_exit_and_file_failures(self, tmp_path):
+        import gradbot
+        from gradbot.api import RunResult
+
+        def seq():
+            gradbot.expect_sequence("3 2 1", [1, 2, 3])
+
+        def exit_code():
+            gradbot.expect_exit(RunResult("", "", 1, False))
+
+        def missing():
+            gradbot.file_exists("out.txt")
+
+        for func in (seq, exit_code, missing):
+            assert self._hint(tmp_path, func, "Author hint") == "Author hint"

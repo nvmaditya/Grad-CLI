@@ -36,9 +36,10 @@ class CheckFailure(Exception):
     information they get — no diffs, no expected output.
     """
 
-    def __init__(self, message: str, hint: str | None = None):
+    def __init__(self, message: str, hint: str | None = None, default_hint: str | None = None):
         super().__init__(message)
-        self.hint = hint
+        self.hint = hint                    # written by the check author for this failure
+        self.default_hint = default_hint    # generic; used only if the check has no hint either
         self.expected: str | None = None
         self.actual: str | None = None
 
@@ -53,11 +54,10 @@ class OutputMismatch(CheckFailure):
         hint: str | None = None,
         mode: str = "exact",
     ):
-        if hint is None:
-            hint = "Your output doesn't match what was expected. Check the format!"
         super().__init__(
             f"Expected {_truncate(expected)}, got {_truncate(actual)}",
             hint=hint,
+            default_hint="Your output doesn't match what was expected. Check the format!",
         )
         self.expected = expected
         self.actual = actual
@@ -240,13 +240,15 @@ def expect_exit(result: RunResult, code: int = 0, hint: str | None = None) -> No
     if result.timed_out:
         raise CheckFailure(
             f"Program timed out (expected exit code {code})",
-            hint=hint or "Your program took too long! Make sure it exits cleanly.",
+            hint=hint,
+            default_hint="Your program took too long! Make sure it exits cleanly.",
         )
 
     if result.exit_code != code:
         raise CheckFailure(
             f"Expected exit code {code}, got {result.exit_code}",
-            hint=hint or (
+            hint=hint,
+            default_hint=(
                 f"Your program exited with code {result.exit_code} instead of {code}.\n"
                 "An exit code of 0 means success. Check for errors in your code!"
             ),
@@ -274,7 +276,8 @@ def file_exists(filename: str, hint: str | None = None) -> None:
     if not filepath.exists():
         raise CheckFailure(
             f"File '{filename}' not found",
-            hint=hint or f"Make sure you have a file called '{filename}' in your solution folder.",
+            hint=hint,
+            default_hint=f"Make sure you have a file called '{filename}' in your solution folder.",
         )
 
 
@@ -304,11 +307,9 @@ def expect_sequence(
     if actual_tokens == expected_tokens:
         return
 
-    raise OutputMismatch(
-        " ".join(expected_tokens),
-        " ".join(actual_tokens),
-        hint=hint or "Your output sequence doesn't match. Check the order and values!",
-    )
+    mismatch = OutputMismatch(" ".join(expected_tokens), " ".join(actual_tokens), hint=hint)
+    mismatch.default_hint = "Your output sequence doesn't match. Check the order and values!"
+    raise mismatch
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
