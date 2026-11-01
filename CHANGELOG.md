@@ -37,6 +37,14 @@ lists the test that covers each feature.
 - The CLI crashed with a traceback on a terminal that could not print ✓.
 - `--timeout`, `time_limit`, `languages` and `hints.general` were parsed
   and ignored. They now work as documented.
+- In the Docker sandbox, Java compiled by a JDK newer than 21 could not run
+  on the image's Java 21 runtime, so correct solutions failed. Docker-mode
+  Java is now compiled with `--release 21`, the grader workflows install JDK
+  21, and an older `javac` is a grader error rather than the student's
+  compile error.
+- A folder of several Python files ran whichever one merely mentioned
+  `__main__`, even in a comment. Only a real top-level
+  `if __name__ == "__main__":` now counts.
 - A program stopped at the time limit was reported as a wrong answer, with
   nothing telling the student it ran out of time. The hint now starts with
   the time limit, and the faculty result says the run timed out.
