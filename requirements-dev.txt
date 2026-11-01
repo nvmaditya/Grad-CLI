@@ -1,5 +1,0 @@
--r requirements.txt
-pytest>=7.0
-pytest-mock>=3.10
-responses>=0.23
-rich>=13.0
