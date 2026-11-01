@@ -32,7 +32,8 @@ classifiers = [
 dev = [
     "pytest==9.2.0",
     "pytest-cov==7.1.0",
-    "coverage==7.17.0",
+    "coverage==7.17.0; python_version >= '3.11'",
+    "coverage==7.16.2; python_version < '3.11'",  # 7.17 dropped Python 3.10
     "ruff==0.17.3",
     "mypy==2.4.1",
     "types-PyYAML==6.0.12.20261030",
