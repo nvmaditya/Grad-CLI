@@ -1,17 +1,13 @@
 """Tests for gradbot.compiler — language detection and compilation."""
 
-import os
-import textwrap
-from pathlib import Path
 
-import pytest
 
 from gradbot.compiler import (
-    detect_language,
-    compile_solution,
-    get_run_command,
-    _extract_friendly_error,
     CompileResult,
+    _extract_friendly_error,
+    compile_solution,
+    detect_language,
+    get_run_command,
 )
 
 

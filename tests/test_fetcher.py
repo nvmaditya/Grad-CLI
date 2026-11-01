@@ -1,11 +1,10 @@
 """Tests for gradbot.fetcher — git-based test suite fetching."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from gradbot.fetcher import fetch, fetch_local, FetchError
+from gradbot.fetcher import FetchError, fetch, fetch_local
 from gradbot.git import GitError
 from gradbot.resolver import ResolvedSlug
 

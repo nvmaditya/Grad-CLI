@@ -7,14 +7,12 @@ into short student-facing messages — raw compiler output is only shown with ``
 
 from __future__ import annotations
 
-import glob
 import os
 import py_compile
 import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 
 
 @dataclass(slots=True)
@@ -84,7 +82,7 @@ def _find_source_files(solution_dir: Path, language: str) -> list[Path]:
         "java": [".java"],
     }
     extensions = ext_map.get(language, [])
-    files = []
+    files: list[Path] = []
     for ext in extensions:
         files.extend(solution_dir.glob(f"*{ext}"))
     return sorted(files)

@@ -9,10 +9,13 @@ These are the core data types that flow through the entire system:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+
+Mode = Literal["practice", "submit"]
+Status = Literal["pass", "fail", "skip", "error"]
 
 
 @dataclass(slots=True)
@@ -21,7 +24,7 @@ class CheckResult:
 
     name: str                                          # human-readable check name
     slug: str                                          # machine identifier (function name)
-    status: Literal["pass", "fail", "skip", "error"]   # outcome
+    status: Status                                     # outcome
     description: str                                   # what was being tested
     hint: str | None = None                            # student-facing hint on failure
     log: list[str] = field(default_factory=list)        # internal detail (--verbose only)
@@ -40,7 +43,7 @@ class SuiteResult:
 
     problem: str                                       # e.g. "Two Sum"
     topic: str                                         # e.g. "Arrays & Strings"
-    mode: Literal["practice", "submit"]                # practice shows details, submit hides
+    mode: Mode                                         # practice shows details, submit hides
     checks: list[CheckResult] = field(default_factory=list)
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

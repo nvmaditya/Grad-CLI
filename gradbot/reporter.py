@@ -22,7 +22,6 @@ from typing import TextIO
 
 from gradbot.result import CheckResult, SuiteResult
 
-
 # ── Color support detection ───────────────────────────────────────────
 
 def _supports_color(stream: TextIO = sys.stdout) -> bool:
@@ -38,7 +37,7 @@ def _supports_color(stream: TextIO = sys.stdout) -> bool:
         # Modern Windows 10+ supports ANSI, enable it
         try:
             import ctypes
-            kernel32 = ctypes.windll.kernel32
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
             # Enable ANSI escape code processing
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
             return True
@@ -294,7 +293,7 @@ def render_compile_error(
             lines.append(c.dim(f"  │ {line}"))
 
     lines.append("")
-    lines.append(f"  Keep going — syntax errors happen to everyone! 🌱")
+    lines.append("  Keep going — syntax errors happen to everyone! 🌱")
     lines.append("")
 
     output = "\n".join(lines)

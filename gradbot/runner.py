@@ -7,9 +7,7 @@ catches all exceptions, and produces a SuiteResult.
 
 from __future__ import annotations
 
-import os
 import shutil
-import sys
 import tempfile
 import time
 import traceback
@@ -18,8 +16,7 @@ from pathlib import Path
 from gradbot import api
 from gradbot.compiler import CompileResult, get_run_command
 from gradbot.loader import CheckFunction, SuiteConfig
-from gradbot.result import CheckResult, SuiteResult
-from gradbot.workspace import cd
+from gradbot.result import CheckResult, Mode, SuiteResult
 
 
 def run_suite(
@@ -27,7 +24,7 @@ def run_suite(
     checks: list[CheckFunction],
     solution_dir: Path,
     compile_result: CompileResult,
-    mode: str,
+    mode: Mode,
     sandbox: str | None = None,
 ) -> SuiteResult:
     """
@@ -61,7 +58,7 @@ def run_suite(
                 name=check.name,
                 slug=check.slug,
                 status="skip",
-                description=f"Skipped — your code needs to compile first",
+                description="Skipped — your code needs to compile first",
                 hint=compile_result.friendly_error or None,
                 points=check.points,
             ))

@@ -11,12 +11,11 @@ from __future__ import annotations
 import importlib.util
 import sys
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
 
 import yaml
-
 
 # ── @gradbot.check decorator ──────────────────────────────────────────
 
@@ -76,7 +75,7 @@ def check(
         )
         _registered_checks.append(cf)
         # Attach metadata to the function for introspection
-        func._gradbot_check = cf
+        func._gradbot_check = cf  # type: ignore[attr-defined]
         return func
 
     return decorator
@@ -120,7 +119,7 @@ def load_suite_config(suite_dir: Path) -> SuiteConfig:
     if not yaml_path.exists():
         raise FileNotFoundError(f"Missing suite.yaml in {suite_dir}")
 
-    with open(yaml_path, "r", encoding="utf-8") as f:
+    with open(yaml_path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
     problem = raw.get("problem", {})
@@ -243,8 +242,8 @@ def _import_checks_module(checks_path: Path) -> list[CheckFunction]:
     except Exception as e:
         raise LoadError(
             f"Error importing {checks_path.name}:\n  {type(e).__name__}: {e}\n"
-            f"Make sure the checks file is valid Python with correct gradbot imports."
-        )
+            "Make sure the checks file is valid Python with correct gradbot imports."
+        ) from e
     finally:
         sys.path = old_path
 

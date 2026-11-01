@@ -17,7 +17,6 @@ via stdin pipe, which is sufficient for DSA problems.
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import threading
@@ -143,7 +142,6 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
     if ctx["sandbox"] == "docker":
         full_cmd = container_argv(Path(work_dir), full_cmd)
 
-    timed_out = False
     try:
         result = subprocess.run(
             full_cmd,
@@ -161,8 +159,8 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
         )
     except subprocess.TimeoutExpired as e:
         return RunResult(
-            stdout=e.stdout or "" if isinstance(e.stdout, str) else (e.stdout.decode("utf-8", errors="replace") if e.stdout else ""),
-            stderr=e.stderr or "" if isinstance(e.stderr, str) else (e.stderr.decode("utf-8", errors="replace") if e.stderr else ""),
+            stdout=_as_text(e.stdout),
+            stderr=_as_text(e.stderr),
             exit_code=-1,
             timed_out=True,
         )
@@ -170,7 +168,7 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
         raise CheckFailure(
             f"Couldn't run the program: {e}",
             hint="Something went wrong trying to run your code. Ask your teacher for help!",
-        )
+        ) from e
 
 
 def expect_output(
@@ -296,6 +294,15 @@ def expect_sequence(
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
+
+
+def _as_text(data: str | bytes | None) -> str:
+    """Partial output from a timed-out process may arrive as bytes or str."""
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data
 
 
 def _truncate(s: str, max_len: int = 80) -> str:

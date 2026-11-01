@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from gradbot.policy import (
+    WORKFLOW_TEXT,
     Identity,
     PolicyError,
-    WORKFLOW_TEXT,
     accept_zip,
     add_roster_entry,
     credential_for,
@@ -52,7 +52,7 @@ class FakeOps:
         try:
             return self.users[token]
         except KeyError:
-            raise PolicyError("unknown token")
+            raise PolicyError("unknown token") from None
 
     def create_ref(self, ref: str) -> bool:
         with self._lock:

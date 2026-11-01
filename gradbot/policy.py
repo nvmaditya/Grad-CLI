@@ -215,7 +215,14 @@ def submit_once(
     return SubmitResult(True, "accepted", ident.user_id, ident.login, ref, True)
 
 
-def accept_zip(ops, token: str, slug: str, zip_bytes: bytes, roster: set[int], body_login: str | None = None) -> SubmitResult:
+def accept_zip(
+    ops,
+    token: str,
+    slug: str,
+    zip_bytes: bytes,
+    roster: set[int],
+    body_login: str | None = None,
+) -> SubmitResult:
     """Validate the zip before the slot ref exists."""
     files = safe_source_files(zip_bytes)
     return submit_once(ops, token, slug, files, roster, body_login)

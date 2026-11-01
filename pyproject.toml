@@ -81,6 +81,11 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# Workflow YAML templates keep their run lines on one line.
+"gradbot/policy.py" = ["E501"]
+"gradbot/grade_workflow.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.10"
 files = ["gradbot"]

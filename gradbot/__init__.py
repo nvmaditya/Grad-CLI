@@ -16,15 +16,14 @@ __version__ = "1.0.0"
 #       gradbot.expect_output(result.stdout, "expected")
 
 from gradbot.api import (
-    run,
-    expect_output,
-    expect_exit,
-    expect_sequence,
-    file_exists,
     CheckFailure,
     RunResult,
+    expect_exit,
+    expect_output,
+    expect_sequence,
+    file_exists,
+    run,
 )
-
 from gradbot.loader import check
 
 __all__ = [

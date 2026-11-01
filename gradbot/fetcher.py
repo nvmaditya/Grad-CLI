@@ -61,7 +61,7 @@ def fetch(resolved: ResolvedSlug, offline: bool = False) -> Path:
                 "You're in offline mode, but GradBot doesn't have a cached copy "
                 f"of '{resolved.raw_slug}'.\n"
                 "Connect to the internet and try again without --offline."
-            )
+            ) from e
         else:
             _raise_fetch_error(e, resolved)
 

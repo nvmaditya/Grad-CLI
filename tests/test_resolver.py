@@ -1,9 +1,8 @@
 """Tests for gradbot.resolver — slug parsing and git origin URL construction."""
 
-import os
 import pytest
 
-from gradbot.resolver import parse_slug, resolve, SlugError, ResolvedSlug
+from gradbot.resolver import SlugError, parse_slug, resolve
 
 
 class TestParseSlug:

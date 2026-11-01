@@ -6,16 +6,12 @@ These tests verify the complete pipeline: load → compile → run → render.
 """
 
 import io
-import os
 from pathlib import Path
-
-import pytest
 
 from gradbot.compiler import compile_solution
 from gradbot.loader import load_checks
 from gradbot.reporter import render
 from gradbot.runner import run_suite
-
 
 # Path to the problems directory
 PROBLEMS_DIR = Path(__file__).parent.parent / "problems"

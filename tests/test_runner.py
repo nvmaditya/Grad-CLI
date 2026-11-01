@@ -1,14 +1,10 @@
 """Tests for gradbot.runner — check execution, DAG traversal, error handling."""
 
-import textwrap
-from pathlib import Path
 
-import pytest
 
 from gradbot.compiler import CompileResult
-from gradbot.loader import CheckFunction, SuiteConfig, load_checks
-from gradbot.runner import run_suite, _run_single_check
-from gradbot.result import CheckResult, SuiteResult
+from gradbot.loader import CheckFunction, SuiteConfig
+from gradbot.runner import run_suite
 
 
 def _make_config(**kwargs) -> SuiteConfig:

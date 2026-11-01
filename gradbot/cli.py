@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from gradbot import __version__
+from gradbot.result import Mode
 
 _COMMANDS = {
     "login", "run", "submit", "dev", "publish", "results", "reset", "roster",
@@ -157,9 +158,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run(args: argparse.Namespace) -> None:
     """Execute the GradBot check pipeline."""
-    from gradbot.fetcher import fetch, fetch_local, FetchError
-    from gradbot.git import ensure_git_installed, GitError
-    from gradbot.resolver import resolve, SlugError
+    from gradbot.fetcher import FetchError, fetch, fetch_local
+    from gradbot.git import GitError, ensure_git_installed
+    from gradbot.resolver import SlugError, resolve
 
     solution_dir = Path(args.solution).resolve()
 
@@ -305,7 +306,7 @@ def _grade_one(
     suite_dir: Path,
     solution_dir: Path,
     checks_filename: str,
-    mode: str,
+    mode: Mode,
     verbose: bool,
     no_color: bool,
     sandbox: str | None,
@@ -355,7 +356,7 @@ def _dispatch(argv: list[str]) -> None:
     if cmd == "dev":
         args = _local_parser("dev").parse_args(argv[1:])
         _require_solution(Path(args.solution))
-        from gradbot.fetcher import fetch_local, FetchError
+        from gradbot.fetcher import FetchError, fetch_local
         try:
             suite_dir = fetch_local(Path(args.path).resolve())
         except FetchError as exc:
@@ -377,9 +378,9 @@ def _dispatch(argv: list[str]) -> None:
             sys.exit(1)
         if not slug.startswith("practice/"):
             slug = f"practice/{slug}"
-        from gradbot.fetcher import fetch, FetchError
-        from gradbot.git import ensure_git_installed, GitError
-        from gradbot.resolver import resolve, SlugError
+        from gradbot.fetcher import FetchError, fetch
+        from gradbot.git import GitError, ensure_git_installed
+        from gradbot.resolver import SlugError, resolve
         try:
             ensure_git_installed()
             resolved = resolve(slug)
@@ -703,7 +704,13 @@ def _github_user(login: str, token: str) -> dict:
     return json.loads(raw)
 
 
-def _http(url: str, method: str = "GET", data: bytes | None = None, headers: dict | None = None, token: str | None = None) -> tuple[int, str]:
+def _http(
+    url: str,
+    method: str = "GET",
+    data: bytes | None = None,
+    headers: dict | None = None,
+    token: str | None = None,
+) -> tuple[int, str]:
     import urllib.error
     import urllib.request
 

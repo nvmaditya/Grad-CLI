@@ -1,16 +1,15 @@
 """Tests for gradbot.git — Git CLI wrapper."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gradbot.git import (
     GitError,
-    run_git,
-    ensure_git_installed,
     clone_or_update,
+    ensure_git_installed,
+    run_git,
 )
 
 

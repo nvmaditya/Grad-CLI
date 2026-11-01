@@ -11,7 +11,6 @@ A thin wrapper around git commands via subprocess. GradBot uses git directly
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 from pathlib import Path
 
@@ -60,12 +59,12 @@ def run_git(
         raise GitError(
             "Git is not installed or not in PATH.\n"
             "Ask your teacher to install Git on this computer."
-        )
+        ) from None
     except subprocess.TimeoutExpired:
         raise GitError(
             f"Git command timed out after {timeout} seconds.\n"
             "Check your internet connection and try again."
-        )
+        ) from None
 
     if result.returncode != 0:
         stderr = result.stderr.strip()
@@ -97,7 +96,7 @@ def ensure_git_installed() -> None:
             "  • Windows: https://git-scm.com/download/win\n"
             "  • macOS:   brew install git\n"
             "  • Linux:   sudo apt install git"
-        )
+        ) from None
 
 
 def clone_or_update(
