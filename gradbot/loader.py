@@ -237,6 +237,10 @@ def _import_checks_module(checks_path: Path) -> list[CheckFunction]:
     # Make sure 'gradbot' is importable within the checks module
     # (it should be, since we're running from an installed package)
     old_path = sys.path.copy()
+    old_dont_write = sys.dont_write_bytecode
+    # No __pycache__ next to checks.py: the suite may be a git clone or a
+    # faculty folder that gets published file by file.
+    sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
     except Exception as e:
@@ -246,6 +250,7 @@ def _import_checks_module(checks_path: Path) -> list[CheckFunction]:
         ) from e
     finally:
         sys.path = old_path
+        sys.dont_write_bytecode = old_dont_write
 
     # Copy and clear the registry
     checks = list(_registered_checks)

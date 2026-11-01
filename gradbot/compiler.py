@@ -8,10 +8,10 @@ into short student-facing messages — raw compiler output is only shown with ``
 from __future__ import annotations
 
 import os
-import py_compile
 import re
 import subprocess
 import sys
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -208,22 +208,51 @@ def compile_solution(solution_dir: Path, language: str | None = None) -> Compile
         )
 
 
+# A folder with several .py files runs the first of these that exists.
+_PYTHON_ENTRY_NAMES = ("solution.py", "main.py")
+
+
+def _python_entry_point(source_files: list[Path]) -> Path | None:
+    """Pick the file to run: solution.py, main.py, the only file, or the only __main__ guard."""
+    by_name = {f.name: f for f in source_files}
+    for name in _PYTHON_ENTRY_NAMES:
+        if name in by_name:
+            return by_name[name]
+    if len(source_files) == 1:
+        return source_files[0]
+    guarded = [
+        f for f in source_files
+        if "__main__" in f.read_text(encoding="utf-8", errors="replace")
+    ]
+    if len(guarded) == 1:
+        return guarded[0]
+    return None
+
+
 def _compile_python(
     solution_dir: Path, source_files: list[Path], source_names: list[str]
 ) -> CompileResult:
-    """Syntax-check Python files using py_compile."""
-    errors = []
-    main_file = None
+    """Syntax-check Python files with the built-in compile(). Writes nothing to disk."""
+    main_file = _python_entry_point(source_files)
+    if main_file is None:
+        return CompileResult(
+            success=False,
+            language="python",
+            friendly_error=(
+                f"GradBot found several Python files ({', '.join(source_names)}) "
+                "and doesn't know which one to run.\n"
+                "Name the file to run solution.py (or main.py)."
+            ),
+            source_files=source_names,
+        )
 
+    errors = []
     for src in source_files:
         try:
-            py_compile.compile(str(src), doraise=True)
-        except py_compile.PyCompileError as e:
-            errors.append(str(e))
-
-        # Look for the main script
-        if main_file is None:
-            main_file = src
+            compile(src.read_bytes(), src.name, "exec", dont_inherit=True)
+        except (SyntaxError, ValueError) as e:
+            # ValueError: null bytes in the source on Python < 3.12.
+            errors.append("".join(traceback.format_exception_only(type(e), e)).rstrip())
 
     if errors:
         raw = "\n".join(errors)

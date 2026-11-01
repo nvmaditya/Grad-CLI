@@ -7,7 +7,6 @@ catches all exceptions, and produces a SuiteResult.
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import time
 import traceback
@@ -17,6 +16,7 @@ from gradbot import api
 from gradbot.compiler import CompileResult, get_run_command
 from gradbot.loader import CheckFunction, SuiteConfig
 from gradbot.result import CheckResult, Mode, SuiteResult
+from gradbot.workspace import copy_solution
 
 
 def run_suite(
@@ -239,18 +239,8 @@ def _run_single_check(
 def _copy_solution_files(
     solution_dir: Path, work_dir: Path, compile_result: CompileResult
 ) -> None:
-    """Copy the student's files into the isolated working directory."""
-    for item in solution_dir.iterdir():
-        if item.name.startswith("."):
-            continue  # skip hidden files
-        if item.name == "__pycache__":
-            continue
-
-        dest = work_dir / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest, dirs_exist_ok=True)
-        else:
-            shutil.copy2(item, dest)
+    """Copy the student's files (and any build output beside them) into the work dir."""
+    copy_solution(solution_dir, work_dir)
 
 
 def _adjust_command_for_workdir(

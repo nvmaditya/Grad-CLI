@@ -316,21 +316,25 @@ def _grade_one(
     from gradbot.loader import load_checks
     from gradbot.reporter import render, render_compile_error
     from gradbot.runner import run_suite
+    from gradbot.workspace import staged_solution
 
     if label:
         print(f"\n{label}")
     config, checks = load_checks(suite_dir, checks_filename)
-    compile_result = compile_solution(solution_dir)
-    if not compile_result.success:
-        render_compile_error(
-            friendly_error=compile_result.friendly_error,
-            raw_error=compile_result.error_output,
-            verbose=verbose,
-            no_color=no_color,
+    # Compile and run from a private copy: binaries, .class files and
+    # __pycache__ never land in the student's folder.
+    with staged_solution(solution_dir) as stage:
+        compile_result = compile_solution(stage)
+        if not compile_result.success:
+            render_compile_error(
+                friendly_error=compile_result.friendly_error,
+                raw_error=compile_result.error_output,
+                verbose=verbose,
+                no_color=no_color,
+            )
+        result = run_suite(
+            config, checks, stage, compile_result, mode, sandbox=sandbox,
         )
-    result = run_suite(
-        config, checks, solution_dir, compile_result, mode, sandbox=sandbox,
-    )
     render(result, verbose=verbose, no_color=no_color)
     return result
 
