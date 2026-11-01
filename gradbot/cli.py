@@ -457,7 +457,12 @@ def _cmd_run(argv: list[str]) -> None:
 
 
 def _local_parser(name: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=f"grade {name}")
+    description = (
+        "Practise: grade the solution against the public checks of a problem in the samples repo."
+        if name == "run" else
+        "Faculty: grade a solution against a problem folder's public checks, then its hidden checks."
+    )
+    parser = argparse.ArgumentParser(prog=f"grade {name}", description=description)
     if name == "run":
         parser.add_argument("path", metavar="topic/problem[@ref]", help="Problem in the public samples repo")
         parser.add_argument("--offline", action="store_true", help="Use the copy downloaded earlier")
@@ -491,9 +496,12 @@ def _require_solution(path: Path) -> None:
 def _cmd_submit(argv: list[str]) -> None:
     from gradbot import remote
 
-    parser = argparse.ArgumentParser(prog="grade submit")
+    parser = argparse.ArgumentParser(
+        prog="grade submit",
+        description="Send your one graded submit to the course App. Run grade login first.",
+    )
     parser.add_argument("slug", help="topic/problem, for example arrays/two_sum")
-    parser.add_argument("--solution", default=".")
+    parser.add_argument("--solution", default=".", metavar="DIR", help="Solution folder (default: .)")
     args = parser.parse_args(argv)
     solution = Path(args.solution).resolve()
     _require_solution(solution)
@@ -504,7 +512,10 @@ def _cmd_submit(argv: list[str]) -> None:
 def _cmd_login(argv: list[str]) -> None:
     from gradbot import remote
 
-    argparse.ArgumentParser(prog="grade login").parse_args(argv)
+    argparse.ArgumentParser(
+        prog="grade login",
+        description="Sign in with GitHub (device flow) and save the token for grade submit.",
+    ).parse_args(argv)
     remote.login(config.load())
     sys.exit(0)
 
@@ -514,8 +525,14 @@ def _cmd_publish(argv: list[str]) -> None:
     from gradbot.policy import hidden_files_in, install_grader_workflow, publish_suite
     from gradbot.remote import problem_slug
 
-    parser = argparse.ArgumentParser(prog="grade publish")
-    parser.add_argument("suite")
+    parser = argparse.ArgumentParser(
+        prog="grade publish",
+        description=(
+            "Faculty: copy a problem into the tests repo (everything) and the samples repo "
+            "(public checks only), and install the grader workflow."
+        ),
+    )
+    parser.add_argument("suite", metavar="PROBLEM_DIR", help="Folder with suite.yaml and checks.py")
     parser.add_argument("--tests", required=True, help="Checkout of the private tests repo")
     parser.add_argument("--samples", required=True, help="Checkout of the public samples repo")
     parser.add_argument("--slug", required=True, help="Path inside the repos, such as arrays/two_sum")
@@ -540,8 +557,11 @@ def _cmd_publish(argv: list[str]) -> None:
 def _cmd_results(argv: list[str]) -> None:
     from gradbot import remote
 
-    parser = argparse.ArgumentParser(prog="grade results")
-    parser.add_argument("file")
+    parser = argparse.ArgumentParser(
+        prog="grade results",
+        description="Print a JSON result with expected output and logs removed.",
+    )
+    parser.add_argument("file", metavar="FILE", help="A JSON result from --output or --student-output")
     args = parser.parse_args(argv)
     remote.results(Path(args.file))
     sys.exit(0)
@@ -550,27 +570,38 @@ def _cmd_results(argv: list[str]) -> None:
 def _cmd_reset(argv: list[str]) -> None:
     from gradbot import remote
 
-    parser = argparse.ArgumentParser(prog="grade reset")
-    parser.add_argument("login")
-    parser.add_argument("slug")
+    parser = argparse.ArgumentParser(
+        prog="grade reset",
+        description="Faculty: give a student one more graded submit for a problem.",
+    )
+    parser.add_argument("login", help="The student's GitHub login")
+    parser.add_argument("slug", help="topic/problem, for example arrays/two_sum")
     args = parser.parse_args(argv)
     remote.reset(config.load(), args.login, args.slug)
     sys.exit(0)
 
 
+_ROOT_HELP = "Folder for the classroom files (default: gradecli)"
+
+
 def _cmd_course(argv: list[str]) -> None:
-    parser = argparse.ArgumentParser(prog="grade course")
+    parser = argparse.ArgumentParser(prog="grade course", description="Classroom files (preview).")
     sub = parser.add_subparsers(dest="action", required=True)
-    add = sub.add_parser("add")
-    add.add_argument("slug")
-    add.add_argument("--name", required=True)
-    add.add_argument("--root", default="gradecli")
-    roster = sub.add_parser("roster-add")
-    roster.add_argument("slug")
-    roster.add_argument("--id", required=True, type=int)
-    roster.add_argument("--username", required=True)
-    roster.add_argument("--role", default="student")
-    roster.add_argument("--root", default="gradecli")
+    add = sub.add_parser("add", help="Create a classroom", description="Create a classroom folder.")
+    add.add_argument("slug", help="Classroom slug, for example cs-fall")
+    add.add_argument("--name", required=True, help="Display name")
+    add.add_argument("--root", default="gradecli", help=_ROOT_HELP)
+    roster = sub.add_parser(
+        "roster-add", help="Add a person to a classroom roster",
+        description="Add a person to a classroom roster.",
+    )
+    roster.add_argument("slug", help="Classroom slug")
+    roster.add_argument("--id", required=True, type=int, help="Numeric GitHub user id")
+    roster.add_argument("--username", required=True, help="GitHub login")
+    roster.add_argument(
+        "--role", default="student", help="student, teacher, head_ta or ta (default: student)",
+    )
+    roster.add_argument("--root", default="gradecli", help=_ROOT_HELP)
     args = parser.parse_args(argv)
     from gradbot.course import CourseError, add_classroom, add_roster_row
     try:
@@ -586,22 +617,24 @@ def _cmd_course(argv: list[str]) -> None:
 
 
 def _cmd_assignment(argv: list[str]) -> None:
-    parser = argparse.ArgumentParser(prog="grade assignment")
+    parser = argparse.ArgumentParser(prog="grade assignment", description="Assignment files (preview).")
     sub = parser.add_subparsers(dest="action", required=True)
-    add = sub.add_parser("add")
-    add.add_argument("classroom")
-    add.add_argument("slug")
-    add.add_argument("--name", required=True)
-    add.add_argument("--root", default="gradecli")
-    test_add = sub.add_parser("test-add")
-    test_add.add_argument("classroom")
-    test_add.add_argument("slug")
-    test_add.add_argument("--name", required=True)
-    test_add.add_argument("--type", required=True, dest="test_type")
-    test_add.add_argument("--points", required=True, type=int)
-    test_add.add_argument("--run", default=None)
-    test_add.add_argument("--expected", default=None)
-    test_add.add_argument("--root", default="gradecli")
+    add = sub.add_parser("add", help="Add an assignment", description="Add an assignment to a classroom.")
+    add.add_argument("classroom", help="Classroom slug")
+    add.add_argument("slug", help="Assignment slug, for example hello")
+    add.add_argument("--name", required=True, help="Display name")
+    add.add_argument("--root", default="gradecli", help=_ROOT_HELP)
+    test_add = sub.add_parser(
+        "test-add", help="Add a test to an assignment", description="Add a test to an assignment.",
+    )
+    test_add.add_argument("classroom", help="Classroom slug")
+    test_add.add_argument("slug", help="Assignment slug")
+    test_add.add_argument("--name", required=True, help="Test name shown to students")
+    test_add.add_argument("--type", required=True, dest="test_type", help="io, run or python")
+    test_add.add_argument("--points", required=True, type=int, help="Points for passing")
+    test_add.add_argument("--run", default=None, help="Command to run")
+    test_add.add_argument("--expected", default=None, help="Expected output")
+    test_add.add_argument("--root", default="gradecli", help=_ROOT_HELP)
     args = parser.parse_args(argv)
     from gradbot.course import CourseError, add_assignment, add_test
     try:
@@ -624,10 +657,13 @@ def _cmd_assignment(argv: list[str]) -> None:
 def _cmd_roster(argv: list[str]) -> None:
     from gradbot import remote
 
-    parser = argparse.ArgumentParser(prog="grade roster")
-    parser.add_argument("action", choices=["add"])
-    parser.add_argument("login")
-    parser.add_argument("--roster", required=True)
+    parser = argparse.ArgumentParser(
+        prog="grade roster",
+        description="Faculty: enrol a student in the roster file by their numeric GitHub id.",
+    )
+    parser.add_argument("action", choices=["add"], help="add")
+    parser.add_argument("login", help="The student's GitHub login")
+    parser.add_argument("--roster", required=True, metavar="FILE", help="The roster YAML file to update")
     args = parser.parse_args(argv)
     remote.roster_add(config.load(), args.login, Path(args.roster))
     sys.exit(0)
