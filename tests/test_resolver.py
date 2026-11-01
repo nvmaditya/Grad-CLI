@@ -65,17 +65,14 @@ class TestResolve:
     def test_practice_repo(self):
         resolved = resolve("practice/arrays/two_sum")
         assert resolved.mode == "practice"
-        assert resolved.token is None  # public repo
-        assert "github.com/GradBot/gradbot-problems-public" in resolved.git_origin
-        assert resolved.git_origin.endswith(".git")
+        assert resolved.git_origin == "https://github.com/nvmaditya/gradbot-course-samples.git"
 
     def test_practice_no_token_in_url(self):
         resolved = resolve("practice/arrays/two_sum")
         assert "@" not in resolved.git_origin  # no token embedded
 
     def test_submit_does_not_clone_private_tests(self, monkeypatch):
-        import gradbot.resolver as r
-        monkeypatch.setattr(r, "GRADBOT_TOKEN", "ghp_test123")
+        monkeypatch.setenv("GRADBOT_TOKEN", "ghp_test123")
         with pytest.raises(SlugError, match="does not download") as raised:
             resolve("submit/arrays/two_sum")
         text = str(raised.value)
@@ -83,20 +80,51 @@ class TestResolve:
         assert "GRADBOT_TOKEN" not in text
 
     def test_env_var_override(self, monkeypatch):
-        import gradbot.resolver as r
-        monkeypatch.setattr(r, "GRADBOT_PUBLIC_REPO", "myorg/myrepo")
+        monkeypatch.setenv("GRADBOT_PUBLIC_REPO", "myorg/myrepo")
         resolved = resolve("practice/arrays/two_sum")
-        assert "myorg/myrepo" in resolved.git_origin
+        assert resolved.git_origin == "https://github.com/myorg/myrepo.git"
 
     def test_cache_key_includes_ref(self):
-        resolved = resolve("practice/arrays/two_sum")
-        assert "main" in resolved.cache_key
+        resolved = resolve("practice/arrays/two_sum@v2")
+        assert resolved.cache_key == "practice/arrays/two_sum/v2"
 
     def test_problem_path(self):
         resolved = resolve("practice/arrays/two_sum")
         assert resolved.problem_path == "arrays/two_sum"
 
-    def test_local_path(self):
+    def test_local_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("GRADBOT_LOCAL_DIR", str(tmp_path))
         resolved = resolve("practice/arrays/two_sum")
-        # local_path should be within GRADBOT_LOCAL_DIR
-        assert "gradbot-problems-public" in str(resolved.local_path)
+        assert resolved.local_path == tmp_path / "nvmaditya" / "gradbot-course-samples"
+
+    def test_url_repos_get_distinct_cache_folders(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("GRADBOT_LOCAL_DIR", str(tmp_path))
+        monkeypatch.setenv("GRADBOT_PUBLIC_REPO", "https://gitlab.com/a/samples.git")
+        first = resolve("practice/arrays/two_sum").local_path
+        monkeypatch.setenv("GRADBOT_PUBLIC_REPO", "https://gitlab.com/b/samples.git")
+        second = resolve("practice/arrays/two_sum").local_path
+        assert first != second
+        assert first.parent == tmp_path / "_by_url"
+
+
+class TestSlugEdgeCases:
+    """Malformed, hostile and unicode slugs are refused before git sees them."""
+
+    @pytest.mark.parametrize(
+        "slug",
+        [
+            "practice/../etc/passwd",
+            "practice/arrays/two_sum@--upload-pack=evil",
+            "practice/arrays/two_sum@-x",
+            "practice/arrays/two_sum@a..b",
+            "practice/arrays/two sum",
+            "practice/arrays/двa",
+            "practice/arrays/two_sum@",
+            "practice//two_sum",
+            "practice/arrays/two_sum/extra",
+            "x" * 5000,
+        ],
+    )
+    def test_refused(self, slug):
+        with pytest.raises(SlugError):
+            parse_slug(slug)

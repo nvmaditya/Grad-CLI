@@ -102,8 +102,7 @@ def test_student_grade_runs_public_checks(tmp_path: Path, capsys):
 
 
 def test_legacy_submit_does_not_ask_for_a_token(capsys, monkeypatch):
-    import gradbot.resolver as resolver
-    monkeypatch.setattr(resolver, "GRADBOT_TOKEN", "ghp_leak")
+    monkeypatch.setenv("GRADBOT_TOKEN", "ghp_leak")
     with pytest.raises(SystemExit) as exc:
         main(["submit/arrays/two_sum", "--no-color"])
     assert exc.value.code == 1
@@ -173,4 +172,15 @@ def test_malformed_suite_yaml_is_reported_cleanly(tmp_path: Path, capsys):
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "suite.yaml" in out
+    assert "bug in Grade" not in out
+
+
+def test_malformed_practice_repo_setting_names_the_variable(tmp_path: Path, capsys, monkeypatch):
+    monkeypatch.setenv("GRADBOT_PUBLIC_REPO", "not a repo")
+    (tmp_path / "solution.py").write_text("print(1)\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main(["run", "arrays/two_sum", "--solution", str(tmp_path)])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "GRADBOT_PUBLIC_REPO is 'not a repo'" in out
     assert "bug in Grade" not in out

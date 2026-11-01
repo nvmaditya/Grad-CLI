@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from gradbot import __version__
+from gradbot.config import ConfigError
 from gradbot.result import Mode
 
 _COMMANDS = {
@@ -40,6 +41,9 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(130)
         except SystemExit:
             raise
+        except ConfigError as e:
+            print(f"❌ {e}")
+            sys.exit(1)
         except Exception as e:
             _handle_fatal_error(e, verbose="--verbose" in raw or "-v" in raw)
             sys.exit(1)
@@ -60,6 +64,9 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(130)
     except SystemExit:
         raise
+    except ConfigError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
     except Exception as e:
         _handle_fatal_error(e, verbose=args.verbose)
         sys.exit(1)
