@@ -313,14 +313,19 @@ def _grade_one(
     label: str | None,
 ):
     from gradbot.compiler import compile_solution
-    from gradbot.loader import load_checks
+    from gradbot.loader import LoadError, load_checks
     from gradbot.reporter import render, render_compile_error
     from gradbot.runner import run_suite
     from gradbot.workspace import staged_solution
 
     if label:
         print(f"\n{label}")
-    config, checks = load_checks(suite_dir, checks_filename)
+    try:
+        config, checks = load_checks(suite_dir, checks_filename)
+    except LoadError as exc:
+        # A broken suite is the author's to fix; say what is wrong, no traceback.
+        print(f"❌ {exc}")
+        sys.exit(1)
     # Compile and run from a private copy: binaries, .class files and
     # __pycache__ never land in the student's folder.
     with staged_solution(solution_dir) as stage:

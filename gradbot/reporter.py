@@ -24,8 +24,9 @@ from gradbot.result import CheckResult, SuiteResult
 
 # ── Color support detection ───────────────────────────────────────────
 
-def _supports_color(stream: TextIO = sys.stdout) -> bool:
+def _supports_color(stream: TextIO | None = None) -> bool:
     """Detect whether the terminal supports ANSI color codes."""
+    stream = sys.stdout if stream is None else stream
     # Respect NO_COLOR convention: https://no-color.org/
     if os.environ.get("NO_COLOR"):
         return False
@@ -146,7 +147,7 @@ def render(
     suite_result: SuiteResult,
     verbose: bool = False,
     no_color: bool = False,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> None:
     """
     Render a SuiteResult to the terminal.
@@ -158,8 +159,9 @@ def render(
         suite_result: The complete suite result to render
         verbose: Show detailed logs and diffs on failure
         no_color: Force disable colors
-        stream: Output stream (default: stdout)
+        stream: Output stream (default: the current sys.stdout)
     """
+    stream = sys.stdout if stream is None else stream
     use_color = not no_color and _supports_color(stream)
     c = _Colors(enabled=use_color)
 
@@ -268,7 +270,7 @@ def render_compile_error(
     raw_error: str = "",
     verbose: bool = False,
     no_color: bool = False,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> None:
     """
     Render a compilation error to the terminal.
@@ -276,6 +278,7 @@ def render_compile_error(
     Shows the friendly message by default. With ``--verbose``, also shows
     the raw compiler output.
     """
+    stream = sys.stdout if stream is None else stream
     use_color = not no_color and _supports_color(stream)
     c = _Colors(enabled=use_color)
 

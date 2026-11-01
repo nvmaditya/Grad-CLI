@@ -185,7 +185,9 @@ def _run_single_check(
             except AssertionError as e:
                 # Support plain assert statements in checks
                 elapsed_ms = (time.perf_counter_ns() - start_time) // 1_000_000
-                hint = check.hint or str(e) or "One of the assertions in this check failed."
+                # The assert message can contain the expected answer, so it
+                # goes to cause (faculty only), never to the hint.
+                hint = check.hint or "One of the assertions in this check failed."
                 log_lines.append(f"AssertionError: {e}")
 
                 return CheckResult(

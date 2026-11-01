@@ -162,3 +162,39 @@ class TestRunSuiteScoring:
         assert result.passed_points == 3  # c1(2) + c3(1)
         assert result.total_points == 4
         assert result.score == 0.75
+
+
+class TestAssertionMessages:
+    """A plain assert message can hold the expected answer; it is not a hint."""
+
+    def test_assert_message_stays_out_of_the_student_hint(self, tmp_path):
+        from gradbot.visibility import student_payload
+
+        def check():
+            raise AssertionError("expected SECRET_9998")
+
+        result = run_suite(
+            _make_config(),
+            [CheckFunction(func=check, name="hidden", slug="hidden")],
+            tmp_path,
+            _make_compile_result(binary_path=str(tmp_path / "solution.py")),
+            "submit",
+        )
+
+        assert result.checks[0].status == "fail"
+        assert result.checks[0].cause == "expected SECRET_9998"
+        assert "SECRET_9998" not in str(student_payload(result))
+
+    def test_assert_uses_the_author_hint(self, tmp_path):
+        def check():
+            raise AssertionError("detail")
+
+        result = run_suite(
+            _make_config(),
+            [CheckFunction(func=check, name="c", slug="c", hint="Check the order")],
+            tmp_path,
+            _make_compile_result(binary_path=str(tmp_path / "solution.py")),
+            "practice",
+        )
+
+        assert result.checks[0].hint == "Check the order"

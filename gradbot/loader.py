@@ -112,23 +112,26 @@ def load_suite_config(suite_dir: Path) -> SuiteConfig:
         Parsed SuiteConfig
 
     Raises:
-        FileNotFoundError: if suite.yaml is missing
-        ValueError: if suite.yaml is malformed
+        LoadError: if suite.yaml is missing, is not valid YAML, or has the wrong shape
     """
-    yaml_path = suite_dir / "suite.yaml"
-    if not yaml_path.exists():
-        raise FileNotFoundError(f"Missing suite.yaml in {suite_dir}")
+    yaml_path = Path(suite_dir) / "suite.yaml"
+    if not yaml_path.is_file():
+        raise LoadError(f"Missing suite.yaml in {suite_dir}")
 
-    with open(yaml_path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    try:
+        raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, UnicodeDecodeError) as e:
+        raise LoadError(f"suite.yaml in {suite_dir} is not valid YAML:\n  {e}") from e
+    if not isinstance(raw, dict):
+        raise LoadError(f"suite.yaml in {suite_dir} must be a mapping of keys, not a {type(raw).__name__}")
 
-    problem = raw.get("problem", {})
-    scoring = raw.get("scoring", {})
-    hints = raw.get("hints", {})
+    problem = _section(raw, "problem", suite_dir)
+    scoring = _section(raw, "scoring", suite_dir)
+    hints = _section(raw, "hints", suite_dir)
 
     return SuiteConfig(
-        name=problem.get("name", "Unnamed Problem"),
-        topic=problem.get("topic", "General"),
+        name=str(problem.get("name", "Unnamed Problem")),
+        topic=str(problem.get("topic", "General")),
         difficulty=problem.get("difficulty", "beginner"),
         description=problem.get("description", ""),
         languages=problem.get("languages", ["python", "c", "cpp", "java"]),
@@ -139,6 +142,16 @@ def load_suite_config(suite_dir: Path) -> SuiteConfig:
         general_hint=hints.get("general", ""),
         raw=raw,
     )
+
+
+def _section(raw: dict, key: str, suite_dir: Path) -> dict:
+    """A top-level suite.yaml section. Missing or empty means defaults."""
+    value = raw.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise LoadError(f"'{key}' in suite.yaml ({suite_dir}) must be a mapping of keys")
+    return value
 
 
 # ── Check loading and DAG construction ────────────────────────────────
@@ -273,7 +286,16 @@ def _topological_sort(checks: list[CheckFunction]) -> list[CheckFunction]:
     Raises:
         LoadError: on invalid references or cycles
     """
-    by_slug = {c.slug: c for c in checks}
+    by_slug: dict[str, CheckFunction] = {}
+    for c in checks:
+        if c.slug in by_slug:
+            raise LoadError(
+                f"Two checks are both named '{c.slug}'. "
+                "Give each @gradbot.check function its own name."
+            )
+        if not isinstance(c.points, int) or isinstance(c.points, bool) or c.points < 0:
+            raise LoadError(f"Check '{c.slug}' has points={c.points!r}; points must be a whole number >= 0.")
+        by_slug[c.slug] = c
 
     # Validate dependencies
     for c in checks:

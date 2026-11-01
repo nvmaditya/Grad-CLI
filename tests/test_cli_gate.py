@@ -152,3 +152,25 @@ def test_run_suite_forwards_docker_sandbox(tmp_path: Path, monkeypatch):
     assert seen["cmd"][0] == "docker"
     assert "--network" in seen["cmd"]
     assert "none" in seen["cmd"]
+
+
+def test_broken_checks_file_is_reported_without_blaming_the_student(tmp_path: Path, capsys):
+    suite, solution = _problem(tmp_path, hidden=False)
+    (suite / "checks.py").write_text("import gradbot\ndef broken(:\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main(["dev", str(suite), "--solution", str(solution), "--no-color"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "Error importing checks.py" in out
+    assert "bug in Grade" not in out
+
+
+def test_malformed_suite_yaml_is_reported_cleanly(tmp_path: Path, capsys):
+    suite, solution = _problem(tmp_path, hidden=False)
+    (suite / "suite.yaml").write_text("problem: [unclosed\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main(["dev", str(suite), "--solution", str(solution), "--no-color"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "suite.yaml" in out
+    assert "bug in Grade" not in out
