@@ -19,6 +19,7 @@ from gradbot import __version__
 from gradbot.errors import UserError
 from gradbot.loader import public_bundle_files
 from gradbot.result import SuiteResult
+from gradbot.sandbox import JAVA_RELEASE
 from gradbot.visibility import student_payload
 
 MAX_ZIP_BYTES = 1_048_576
@@ -83,6 +84,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Java is compiled here and run on the sandbox image's JRE.
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "@JAVA_RELEASE@"
+
       - name: Install GradBot
         env:
           GRADBOT_PIP_SPEC: ${{ vars.GRADBOT_PIP_SPEC || '@INSTALL_SPEC@' }}
@@ -115,7 +123,7 @@ jobs:
             faculty.json
             student.json
           if-no-files-found: warn
-""".replace("@INSTALL_SPEC@", INSTALL_SPEC)
+""".replace("@INSTALL_SPEC@", INSTALL_SPEC).replace("@JAVA_RELEASE@", str(JAVA_RELEASE))
 
 
 class PolicyError(UserError):

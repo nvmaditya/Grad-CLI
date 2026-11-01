@@ -3,7 +3,9 @@
 Used by the grader workflow (``--sandbox docker``). The work directory is
 mounted at ``/work`` and the command uses container paths, never host paths.
 C and C++ are linked statically in this mode, so the binary does not depend
-on the host's glibc matching the image's.
+on the host's glibc matching the image's. Java is compiled with
+``--release JAVA_RELEASE``, so a newer host JDK still writes class files the
+image's JRE can load.
 """
 
 from __future__ import annotations
@@ -19,11 +21,14 @@ logger = logging.getLogger("gradbot.sandbox")
 
 CONTAINER_WORKDIR = "/work"
 
+# The Java image's JRE version. Docker-mode Java is compiled for it.
+JAVA_RELEASE = 21
+
 IMAGES = {
     "python": "python:3.12-slim",
     "c": "debian:bookworm-slim",
     "cpp": "debian:bookworm-slim",
-    "java": "eclipse-temurin:21-jre",
+    "java": f"eclipse-temurin:{JAVA_RELEASE}-jre",
 }
 
 # Per container. Generous for DSA solutions; a fork bomb or a runaway

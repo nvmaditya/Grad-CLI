@@ -7,7 +7,9 @@ cannot read. Students never receive a copy of it.
 
 Install GradBot the same way students do (see the
 [student guide](student-guide.md#install)). Docker is needed only if you run
-the grader's sandbox yourself.
+the grader's sandbox yourself; for Java submissions that also needs JDK 21 or
+newer, because Java is compiled for the sandbox image's Java 21 runtime
+(`javac --release 21`).
 
 ## Author and check a problem
 
@@ -127,7 +129,8 @@ runs only on `workflow_dispatch` with `slug`, `user_id` and
 
 1. checks out the tests repo and the submission (with `GRADBOT_APP_TOKEN`,
    only in that step, and without leaving credentials in `.git/config`),
-2. installs Python 3.12 and GradBot,
+2. installs Python 3.12, JDK 21 (Java is compiled on the runner with
+   `--release 21` for the sandbox image's Java 21 runtime) and GradBot,
 3. runs `grade dev --sandbox docker` with every token cleared: the student
    program runs in a container with no network, 512 MB, 256 processes, as a
    non-root user, with only the solution folder mounted,

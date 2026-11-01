@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 from gradbot.policy import INSTALL_SPEC
+from gradbot.sandbox import JAVA_RELEASE
 
 
 def grade_workflow_text() -> str:
-    return _TEXT.replace("@INSTALL_SPEC@", INSTALL_SPEC)
+    return _TEXT.replace("@INSTALL_SPEC@", INSTALL_SPEC).replace("@JAVA_RELEASE@", str(JAVA_RELEASE))
 
 
 _TEXT = """\
@@ -63,6 +64,13 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      # Java is compiled here and run on the sandbox image's JRE.
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "@JAVA_RELEASE@"
 
       - name: Install GradBot
         env:

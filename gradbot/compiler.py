@@ -15,6 +15,9 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from gradbot.errors import UserError
+from gradbot.sandbox import JAVA_RELEASE
+
 
 @dataclass(slots=True)
 class CompileResult:
@@ -153,7 +156,7 @@ def _extract_friendly_error(raw_error: str, language: str) -> str:
 
 
 def compile_solution(
-    solution_dir: Path, language: str | None = None, static: bool = False,
+    solution_dir: Path, language: str | None = None, for_docker: bool = False,
 ) -> CompileResult:
     """
     Compile the student's solution.
@@ -161,7 +164,8 @@ def compile_solution(
     Args:
         solution_dir: Path to the directory containing the student's code
         language: Override language detection (if None, auto-detect)
-        static: Link C/C++ statically (for running in a Docker image; Linux only)
+        for_docker: Build for the sandbox images: link C/C++ statically (Linux
+            only) and compile Java for the image's JRE (``--release``)
 
     Returns:
         CompileResult with success status, binary path, and error info
@@ -198,11 +202,11 @@ def compile_solution(
     if language == "python":
         return _compile_python(solution_dir, source_files, source_names)
     elif language == "c":
-        return _compile_c(solution_dir, source_files, source_names, static)
+        return _compile_c(solution_dir, source_files, source_names, for_docker)
     elif language == "cpp":
-        return _compile_cpp(solution_dir, source_files, source_names, static)
+        return _compile_cpp(solution_dir, source_files, source_names, for_docker)
     elif language == "java":
-        return _compile_java(solution_dir, source_files, source_names)
+        return _compile_java(solution_dir, source_files, source_names, for_docker)
     else:
         return CompileResult(
             success=False,
@@ -396,10 +400,11 @@ def _compile_cpp(
 
 
 def _compile_java(
-    solution_dir: Path, source_files: list[Path], source_names: list[str]
+    solution_dir: Path, source_files: list[Path], source_names: list[str], for_docker: bool = False
 ) -> CompileResult:
-    """Compile Java files using javac."""
-    cmd = ["javac", *[str(f) for f in source_files]]
+    """Compile Java files using javac; for Docker, for the image's JRE."""
+    release = ["--release", str(JAVA_RELEASE)] if for_docker else []
+    cmd = ["javac", *release, *[str(f) for f in source_files]]
 
     try:
         result = subprocess.run(
@@ -425,6 +430,14 @@ def _compile_java(
             language="java",
             friendly_error="Compilation took too long — that shouldn't happen!",
             source_files=source_names,
+        )
+
+    too_old = re.search(r"release version \d+ not supported", result.stderr)
+    if result.returncode != 0 and for_docker and too_old:
+        # The grader's JDK is too old; the student's code never reached the compiler.
+        raise UserError(
+            f"Grading Java in the Docker sandbox needs JDK {JAVA_RELEASE} or newer on this "
+            f"machine: javac {' '.join(release)} failed with: {result.stderr.splitlines()[0]}"
         )
 
     if result.returncode != 0:

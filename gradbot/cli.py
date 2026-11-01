@@ -381,7 +381,7 @@ def _grade_one(
     # __pycache__ never land in the student's folder.
     with staged_solution(solution_dir) as stage:
         compile_result = restrict_languages(
-            compile_solution(stage, static=sandbox == "docker"), config.languages,
+            compile_solution(stage, for_docker=sandbox == "docker"), config.languages,
         )
         if sandbox == "docker" and compile_result.success:
             ensure_image(IMAGES[compile_result.language])

@@ -15,6 +15,7 @@ import yaml
 
 from gradbot.grade_workflow import grade_workflow_text
 from gradbot.policy import INSTALL_SPEC, WORKFLOW_TEXT, publish_suite
+from gradbot.sandbox import JAVA_RELEASE
 from tests.samples_repo import TWO_SUM_CHECKS, TWO_SUM_SOLUTION, TWO_SUM_SUITE
 from tests.toolchains import needs_docker, with_marks
 
@@ -49,6 +50,17 @@ def test_every_action_is_a_node24_major(name):
     assert uses
     old = [f"{action}@v{major}" for action, major in uses if int(major) < _NODE24_MAJOR[action]]
     assert old == []
+
+
+@pytest.mark.parametrize("name", TEMPLATES)
+def test_the_grader_compiles_java_with_jdk_21_before_grading(name):
+    # The Grade step compiles on the runner and runs on the image's Java 21 JRE.
+    steps = _steps(TEMPLATES[name])
+    order = list(steps)
+    java = steps["Set up Java"]
+    assert java["uses"].startswith("actions/setup-java@")
+    assert java["with"] == {"distribution": "temurin", "java-version": str(JAVA_RELEASE)}
+    assert order.index("Set up Java") < order.index("Grade")
 
 
 @pytest.mark.parametrize("name", TEMPLATES)

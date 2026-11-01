@@ -11,7 +11,8 @@ from gradbot.compiler import CompileResult, compile_solution
 from gradbot.errors import UserError
 from gradbot.loader import CheckFunction, SuiteConfig
 from gradbot.runner import run_suite
-from gradbot.sandbox import IMAGES, container_argv, ensure_image
+from gradbot.sandbox import IMAGES, JAVA_RELEASE, container_argv, ensure_image
+from tests.toolchains import needs_jdk, with_marks
 
 
 def test_container_argv_is_networkless_and_mounts_only_work(tmp_path: Path):
@@ -211,5 +212,52 @@ def test_docker_mode_links_c_statically(tmp_path, monkeypatch):
 
     (tmp_path / "solution.c").write_text("int main(void){return 0;}\n", encoding="utf-8")
     monkeypatch.setattr("gradbot.compiler.subprocess.run", fake_run)
-    compile_solution(tmp_path, static=True)
+    compile_solution(tmp_path, for_docker=True)
     assert "-static" in seen[0]
+
+
+_JAVA_MAIN = "public class Solution { public static void main(String[] a) {} }\n"
+
+
+def _javac_argv(tmp_path, monkeypatch, *, for_docker: bool, stderr: str = "", returncode: int = 0):
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(list(cmd))
+        return MagicMock(returncode=returncode, stdout="", stderr=stderr)
+
+    (tmp_path / "Solution.java").write_text(_JAVA_MAIN, encoding="utf-8")
+    monkeypatch.setattr("gradbot.compiler.subprocess.run", fake_run)
+    compile_solution(tmp_path, for_docker=for_docker)
+    return seen[0]
+
+
+def test_the_java_release_is_the_image_jre():
+    assert JAVA_RELEASE == 21
+    assert IMAGES["java"] == "eclipse-temurin:21-jre"
+
+
+def test_docker_mode_compiles_java_for_the_image_jre(tmp_path, monkeypatch):
+    assert _javac_argv(tmp_path, monkeypatch, for_docker=True)[:3] == ["javac", "--release", "21"]
+
+
+def test_local_mode_compiles_java_for_the_host_jdk(tmp_path, monkeypatch):
+    assert "--release" not in _javac_argv(tmp_path, monkeypatch, for_docker=False)
+
+
+def test_a_javac_too_old_for_the_image_is_a_grader_error(tmp_path, monkeypatch):
+    # Not the student's compile error: their code never reached the compiler.
+    with pytest.raises(UserError, match="JDK 21 or newer"):
+        _javac_argv(
+            tmp_path, monkeypatch, for_docker=True, returncode=2,
+            stderr="error: release version 21 not supported\nUsage: javac <options> <source files>\n",
+        )
+
+
+@with_marks(needs_jdk)
+def test_docker_mode_class_files_are_java_21(tmp_path):
+    (tmp_path / "Solution.java").write_text(_JAVA_MAIN, encoding="utf-8")
+    assert compile_solution(tmp_path, for_docker=True).success
+    header = (tmp_path / "Solution.class").read_bytes()[:8]
+    assert header[:4] == bytes.fromhex("cafebabe")
+    assert int.from_bytes(header[6:8], "big") == 65  # Java 21
