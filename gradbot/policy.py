@@ -22,7 +22,8 @@ from gradbot.result import SuiteResult
 from gradbot.visibility import student_payload
 
 MAX_ZIP_BYTES = 1_048_576
-_ALLOWED_EXTENSIONS = {".py", ".c", ".h", ".cpp", ".cc", ".hpp", ".java"}
+# Every extension the compiler builds, plus C and C++ headers.
+_ALLOWED_EXTENSIONS = {".py", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".java"}
 
 # Where the grader installs GradBot from. Override per course with the
 # repository variable GRADBOT_PIP_SPEC (for example a fork or a commit).

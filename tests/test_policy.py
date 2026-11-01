@@ -301,3 +301,10 @@ def test_roster_tracks_id_not_login_case():
     updated = add_roster_entry(text, "ada", 5)
     assert parse_roster(updated) == {5}
     assert updated.count("id: 5") == 1
+
+
+def test_submit_accepts_every_extension_the_compiler_accepts():
+    from gradbot.compiler import _EXTENSION_MAP
+
+    names = {f"solution{ext}": b"x" for ext in _EXTENSION_MAP}
+    assert set(safe_source_files(_zip(names))) == set(names)
