@@ -22,19 +22,19 @@ covers each feature, the bugs found and fixed, and what is still unverified.
 | Live | See [Live run](#live-run). `GRADBOT_LIVE=1 pytest -m live`: practice against the real public demo course **passed**; device-login start and user lookup **skipped** (no `GRADBOT_CLIENT_ID` / `GRADBOT_APP_TOKEN`) |
 | CI | `harden` pushed. [Run #1](https://github.com/nvmaditya/gradbot/actions/runs/41277714442) on `ede665a`: **all 9 jobs passed** (lint and types; tests on Ubuntu Python 3.10–3.14 and macOS Python 3.12; Docker sandbox; wheel). On Ubuntu 3.10: 490 passed, 2 skipped, coverage 96.38%. Docker job: 7 passed. [Run #2](https://github.com/nvmaditya/gradbot/actions/runs/41278562877) on `386d53c`: **all 9 jobs passed** on the Node 24 action majors; Docker job: 7 passed; 0 warnings (the Node 20 deprecation warnings from run #1 are gone; 9 notices about runner images remain) |
 
-### Test inventory: 526 tests
+### Test inventory: 537 tests
 
 | Group | Tests | Where they ran |
 |---|---|---|
-| Offline suite (`-m "not docker and not live"`) | 515 | Here, every run, and on every CI test job. Java tests skip without a JDK and ran with one; 2 actionlint tests skip (not installed). |
+| Offline suite (`-m "not docker and not live"`) | 526 | Here, every run, and on every CI test job. Java tests skip without a JDK and ran with one; 2 actionlint tests skip (not installed). |
 | Docker (`-m docker`) | 7 | Not here (no Docker). **Passed on CI's `docker` job** (Ubuntu runner's Docker daemon). |
 | Live (`-m live`) | 4 | 2 ran and passed (practice, `.env` not tracked); 2 skipped for missing keys. |
 
 Largest files: `test_remote_commands.py` 44, `test_course.py` 40,
 `test_edges.py` 35, `test_resolver.py` 29, `test_api.py` 27,
-`test_practice_fetch.py` 26, `test_compiler_errors.py` 22, `test_loader.py` 21,
+`test_practice_fetch.py` 26, `test_compiler_errors.py` 26, `test_loader.py` 21,
 `test_policy.py` 21, `test_compiler.py` 21, `test_suite_settings.py` 24,
-`test_workflows.py` 21, `test_e2e.py` 18, `test_reporter.py` 18,
+`test_workflows.py` 23, `test_e2e.py` 18, `test_reporter.py` 18,
 `test_docs.py` 18 (every relative link resolves; every test cited here exists).
 
 ## Feature table
@@ -51,7 +51,7 @@ not built, on the roadmap.
 | 3 | `--offline` and network fallback to the same ref | `fetcher.fetch`, `git.checkout_cached` | verified, and live | `test_practice_fetch.py::test_offline_*`, `::test_network_failure_*`, `::test_failed_first_fetch_leaves_no_cache_behind`; `test_git.py::TestCloneOrUpdate` |
 | 4 | Faculty `grade dev`: public then hidden, names the failing set | `cli.grade_dev` | verified | `test_e2e.py::test_every_bundled_problem_passes_its_sample_solution` (all 5), `::test_faculty_dev_names_the_failing_hidden_set_and_results_strip_it`; `test_cli_gate.py::test_dev_says_which_set_failed_and_strips_student_file` |
 | 5 | Student runs refuse `checks_hidden.py` | `loader.guard_student_suite` | verified | `test_cli_gate.py::test_student_grade_refuses_*`; `test_hidden_load.py`; `test_e2e.py::test_practice_refuses_hidden_checks_next_to_the_solution` |
-| 6 | Python solutions | `compiler._compile_python` | verified | `test_languages.py::*[python]`; `test_compiler.py::TestPythonInterpreter`; `test_student_folder.py` |
+| 6 | Python solutions, and which file runs | `compiler._compile_python`, `_python_entry_point` | verified | `test_languages.py::*[python]`; `test_compiler.py::TestPythonInterpreter`; `test_student_folder.py`; `test_compiler_errors.py::test_a_helper_that_only_mentions_main_is_not_the_entry_point`, `::test_the_main_guard_wins_over_a_helper_that_mentions_main` |
 | 7 | C solutions | `compiler._compile_c` | verified (Apple clang) | `test_languages.py::*[c]`; `test_student_folder.py::test_c_grade_leaves_no_binary_in_the_student_folder` |
 | 8 | C++ solutions | `compiler._compile_cpp` | verified (Apple clang) | `test_languages.py::*[cpp]` |
 | 9 | Java solutions | `compiler._compile_java` | verified (Temurin 21) | `test_languages.py::*[java]`; `test_compiler_errors.py::test_java_main_class_is_the_file_with_main` |
@@ -64,7 +64,7 @@ not built, on the roadmap.
 | 16 | Exit code 0 only on full marks | `cli` | verified | every test in `test_e2e.py` asserts the exit code |
 | 17 | `--timeout`, and telling the student a run hit the time limit | `cli._positive_seconds`, `api.run`, `runner._time_limit_hint` | verified, and live | `test_suite_settings.py::test_timeout_flag_*`, `::test_an_explicit_timeout_in_the_check_wins`, `::test_bad_timeout_flag_is_refused`, `::test_a_timed_out_program_*`, `::test_the_faculty_cause_says_the_program_timed_out` |
 | 18 | `suite.yaml`: `time_limit`, `languages`, `hints.general`, `total_points` | `loader.load_suite_config`, `compiler.restrict_languages`, `reporter` | verified | `test_suite_settings.py`; `test_loader.py` (suite.yaml section) |
-| 19 | Docker sandbox (`--sandbox docker`) | `sandbox.py`, `api.run`, `runner` | verified on CI's Docker (not on this Mac) | `test_sandbox.py` (argv, stdin flag, container paths, limits, kill on timeout, image pull) here; `test_docker_sandbox.py` (Python, C and Java in containers, no network, no tokens, timed-out container removed) passed on CI's `docker` job |
+| 19 | Docker sandbox (`--sandbox docker`) | `sandbox.py`, `api.run`, `runner` | verified on CI's Docker (not on this Mac) | `test_sandbox.py` (argv, stdin flag, container paths, limits, kill on timeout, image pull, `javac --release 21`) here; CI's `docker` job compiles Java with JDK 25 so a release mismatch fails it; `test_docker_sandbox.py` (Python, C and Java in containers, no network, no tokens, timed-out container removed) passed on CI's `docker` job |
 | 20 | `grade publish` | `policy.publish_suite`, `cli._cmd_publish` | verified, and live (published, pushed, practised from GitHub) | `test_publish.py`; `test_policy.py::test_publish_hides_checks_and_workflow_from_samples`; `test_e2e.py::test_publish_then_a_student_practises_the_published_problem` |
 | 21 | Grader workflow `grade.yml` | `policy.WORKFLOW_TEXT` | **structure verified; Grade step's script verified on CI; never dispatched** | `test_workflows.py` (YAML parsed: triggers, install before grade, no inputs in shell, credentials, cleared tokens, grading-finished check, Node 24 action majors). `::test_publish_grade_step_runs_for_real` passed on CI's `docker` job |
 | 22 | `grade login` (device flow) | `remote.login` | verified (fake) | `test_remote_commands.py::test_login_*`; `test_e2e.py::test_graded_submit_round_trip`. Live device start skipped (no client id) |
@@ -147,6 +147,8 @@ Each one had a regression test that failed before the fix.
 | Found in the live run: the C test fixture overran `int a[1000]` on the real course's 10,000-number check (GradBot graded it correctly; the test input was wrong) | `56df2b0` |
 | Found on CI: every action in CI and in both grader workflow templates ran on the deprecated Node 20 runtime | `862b5c4` |
 | Found in the live run: ten subcommands' `--help` listed arguments with no description | `386d53c` |
+| Found in PR review: Docker-mode Java was compiled by the host JDK and run on a Java 21 JRE; with JDK 25 a correct solution scored 0 (reproduced on CI run #5 before the fix) | `88a744a`, `1b6f038` |
+| Found in PR review: with several `.py` files, a helper that merely mentioned `__main__` ran instead of the program | `4c37e7f` |
 
 ## Still unverified, and why
 
