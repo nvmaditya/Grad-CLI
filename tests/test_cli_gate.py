@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from gradbot.cli import grade_dev, grade_student, main, save_login_token
+from gradbot.cli import grade_dev, grade_student, main
 from gradbot.compiler import compile_solution
 from gradbot.loader import CheckFunction, SuiteConfig
+from gradbot.remote import save_login_token
 from gradbot.runner import run_suite
 
 _SUITE = """\

@@ -15,12 +15,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
-from gradbot import __version__
-from gradbot.config import ConfigError
+from gradbot import __version__, config
+from gradbot.errors import UserError
 from gradbot.result import Mode
 
 _COMMANDS = {
@@ -41,7 +40,7 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(130)
         except SystemExit:
             raise
-        except ConfigError as e:
+        except UserError as e:
             print(f"❌ {e}")
             sys.exit(1)
         except Exception as e:
@@ -64,7 +63,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(130)
     except SystemExit:
         raise
-    except ConfigError as e:
+    except UserError as e:
         print(f"❌ {e}")
         sys.exit(1)
     except Exception as e:
@@ -268,14 +267,6 @@ def _handle_fatal_error(error: Exception, verbose: bool = False) -> None:
     else:
         print(f"   Error: {error}")
         print("   (Run with --verbose for more details)")
-
-
-def save_login_token(token: str, config_dir: Path) -> Path:
-    """Store the device token outside the solution directory."""
-    path = Path(config_dir) / "github_token"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(token, encoding="utf-8")
-    return path
 
 
 def grade_student(
@@ -503,109 +494,24 @@ def _require_solution(path: Path) -> None:
 
 
 def _cmd_submit(argv: list[str]) -> None:
-    import io
-    import zipfile
+    from gradbot import remote
 
-    from gradbot.policy import PolicyError, safe_source_files
-
-    parser = argparse.ArgumentParser(prog="gradbot submit")
-    parser.add_argument("slug")
+    parser = argparse.ArgumentParser(prog="grade submit")
+    parser.add_argument("slug", help="topic/problem, for example arrays/two_sum")
     parser.add_argument("--solution", default=".")
     args = parser.parse_args(argv)
     solution = Path(args.solution).resolve()
     _require_solution(solution)
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as archive:
-        for path in solution.rglob("*"):
-            if path.is_file():
-                archive.write(path, path.relative_to(solution).as_posix())
-    try:
-        safe_source_files(buf.getvalue())
-    except PolicyError as exc:
-        print(f"❌ {exc}")
-        sys.exit(1)
-
-    url = os.environ.get("GRADBOT_SUBMIT_URL")
-    if not url:
-        print("Hidden tests are not on this computer.")
-        print("Set GRADBOT_SUBMIT_URL to your course App, then run: gradbot submit " + args.slug)
-        print("Practice with: gradbot run " + args.slug)
-        sys.exit(1)
-    token_file = Path(os.environ.get("GRADBOT_CONFIG_DIR", Path.home() / ".gradbot")) / "github_token"
-    if not token_file.is_file():
-        print("❌ Run gradbot login first.")
-        sys.exit(1)
-    token = token_file.read_text(encoding="utf-8").strip()
-    status, response = _http(
-        url,
-        method="POST",
-        data=buf.getvalue(),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-Gradbot-Slug": args.slug,
-            "Content-Type": "application/zip",
-        },
-    )
-    print(response)
-    sys.exit(0 if status == 200 else 1)
+    remote.submit(config.load(), args.slug, solution)
+    sys.exit(0)
 
 
 def _cmd_login(argv: list[str]) -> None:
-    import time
-    import urllib.parse
+    from gradbot import remote
 
-    from gradbot.policy import device_code_body
-
-    argparse.ArgumentParser(prog="gradbot login").parse_args(argv)
-    client_id = os.environ.get("GRADBOT_CLIENT_ID")
-    if not client_id:
-        print("Set GRADBOT_CLIENT_ID to the course GitHub OAuth app id, then run gradbot login.")
-        print("The requested scope is read:user. That proves who you are. It does not enroll you.")
-        sys.exit(1)
-    body = urllib.parse.urlencode(device_code_body(client_id)).encode()
-    status, payload = _http(
-        "https://github.com/login/device/code",
-        method="POST",
-        data=body,
-        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
-    )
-    if status != 200:
-        print(f"❌ GitHub login failed: {payload}")
-        sys.exit(1)
-    started = json.loads(payload)
-    print(f"Open {started['verification_uri']} and enter {started['user_code']}")
-    interval = int(started.get("interval", 5))
-    deadline = time.time() + 15 * 60
-    while time.time() < deadline:
-        time.sleep(interval)
-        poll = urllib.parse.urlencode({
-            "client_id": client_id,
-            "device_code": started["device_code"],
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        }).encode()
-        status, raw = _http(
-            "https://github.com/login/oauth/access_token",
-            method="POST",
-            data=poll,
-            headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
-        )
-        token_payload = json.loads(raw) if raw else {}
-        if "access_token" in token_payload:
-            config = Path(os.environ.get("GRADBOT_CONFIG_DIR", Path.home() / ".gradbot"))
-            path = save_login_token(token_payload["access_token"], config)
-            print(f"Logged in. Token saved to {path}")
-            sys.exit(0)
-        error = token_payload.get("error")
-        if error == "slow_down":
-            interval += 5
-            continue
-        if error == "authorization_pending":
-            continue
-        print(f"❌ GitHub login failed: {error or raw}")
-        sys.exit(1)
-    print("❌ The device code expired. Run gradbot login again.")
-    sys.exit(1)
+    argparse.ArgumentParser(prog="grade login").parse_args(argv)
+    remote.login(config.load())
+    sys.exit(0)
 
 
 def _cmd_publish(argv: list[str]) -> None:
@@ -627,50 +533,24 @@ def _cmd_publish(argv: list[str]) -> None:
 
 
 def _cmd_results(argv: list[str]) -> None:
-    parser = argparse.ArgumentParser(prog="gradbot results")
+    from gradbot import remote
+
+    parser = argparse.ArgumentParser(prog="grade results")
     parser.add_argument("file")
     args = parser.parse_args(argv)
-    payload = json.loads(Path(args.file).read_text(encoding="utf-8"))
-    print(json.dumps(_strip_secrets(payload), indent=2))
+    remote.results(Path(args.file))
     sys.exit(0)
 
 
-def _strip_secrets(value):
-    if isinstance(value, dict):
-        return {
-            key: _strip_secrets(item)
-            for key, item in value.items()
-            if key not in {"cause", "log"}
-        }
-    if isinstance(value, list):
-        return [_strip_secrets(item) for item in value]
-    return value
-
-
 def _cmd_reset(argv: list[str]) -> None:
-    from gradbot.policy import slot_ref
+    from gradbot import remote
 
-    parser = argparse.ArgumentParser(prog="gradbot reset")
+    parser = argparse.ArgumentParser(prog="grade reset")
     parser.add_argument("login")
     parser.add_argument("slug")
     args = parser.parse_args(argv)
-    token = os.environ.get("GRADBOT_APP_TOKEN")
-    repo = os.environ.get("GRADBOT_SUBMISSIONS_REPO")
-    if not token or not repo:
-        print("Faculty only. Set GRADBOT_APP_TOKEN and GRADBOT_SUBMISSIONS_REPO.")
-        print("A student token cannot delete a slot.")
-        sys.exit(1)
-    user = _github_user(args.login, token)
-    ref = slot_ref(args.slug, int(user["id"]))
-    print(f"Reset {user['login']} id {user['id']} by deleting {ref}")
-    api_ref = ref.removeprefix("refs/")
-    status, response = _http(
-        f"https://api.github.com/repos/{repo}/git/refs/{api_ref}",
-        method="DELETE",
-        token=token,
-    )
-    print(response or "deleted")
-    sys.exit(0 if status in (200, 204) else 1)
+    remote.reset(config.load(), args.login, args.slug)
+    sys.exit(0)
 
 
 def _cmd_course(argv: list[str]) -> None:
@@ -737,52 +617,12 @@ def _cmd_assignment(argv: list[str]) -> None:
 
 
 def _cmd_roster(argv: list[str]) -> None:
+    from gradbot import remote
+
     parser = argparse.ArgumentParser(prog="grade roster")
     parser.add_argument("action", choices=["add"])
     parser.add_argument("login")
     parser.add_argument("--roster", required=True)
     args = parser.parse_args(argv)
-    from gradbot.policy import add_roster_entry
-
-    token = os.environ.get("GRADBOT_APP_TOKEN")
-    if not token:
-        print("Set GRADBOT_APP_TOKEN. The id has to come from GitHub, not from a number you type.")
-        sys.exit(1)
-    user = _github_user(args.login, token)
-    print(f"GitHub says login {user['login']} id {user['id']}. Writing that id.")
-    path = Path(args.roster)
-    current = path.read_text(encoding="utf-8") if path.is_file() else "students: []\n"
-    path.write_text(add_roster_entry(current, user["login"], int(user["id"])), encoding="utf-8")
-    print(f"Wrote {path}")
+    remote.roster_add(config.load(), args.login, Path(args.roster))
     sys.exit(0)
-
-
-def _github_user(login: str, token: str) -> dict:
-    status, raw = _http(f"https://api.github.com/users/{login}", token=token)
-    if status != 200:
-        print(f"❌ GitHub did not resolve {login}: {raw}")
-        sys.exit(1)
-    return json.loads(raw)
-
-
-def _http(
-    url: str,
-    method: str = "GET",
-    data: bytes | None = None,
-    headers: dict | None = None,
-    token: str | None = None,
-) -> tuple[int, str]:
-    import urllib.error
-    import urllib.request
-
-    req_headers = {"User-Agent": "gradbot", "Accept": "application/vnd.github+json"}
-    if token:
-        req_headers["Authorization"] = f"Bearer {token}"
-    if headers:
-        req_headers.update(headers)
-    request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, response.read().decode()
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode()

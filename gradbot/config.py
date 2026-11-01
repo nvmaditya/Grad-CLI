@@ -14,7 +14,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from gradbot.errors import UserError
+
 DEFAULT_PUBLIC_REPO = "nvmaditya/gradbot-course-samples"
+DEFAULT_GITHUB_URL = "https://github.com"
+DEFAULT_GITHUB_API_URL = "https://api.github.com"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +45,10 @@ VARIABLES: tuple[Variable, ...] = (
              "Faculty GitHub token. Never give this to students."),
     Variable("GRADBOT_SUBMISSIONS_REPO", "grade reset", True, None,
              "owner/repo that holds the one-submit slot refs."),
+    Variable("GRADBOT_GITHUB_URL", "grade login", False, DEFAULT_GITHUB_URL,
+             "GitHub web URL. Change it for GitHub Enterprise Server."),
+    Variable("GRADBOT_GITHUB_API_URL", "grade roster add, grade reset", False, DEFAULT_GITHUB_API_URL,
+             "GitHub REST API URL. Change it for GitHub Enterprise Server."),
     Variable("NO_COLOR", "all commands", False, None,
              "Any value turns off coloured output (https://no-color.org)."),
 )
@@ -49,7 +57,7 @@ _OWNER_REPO = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$")
 _URL_PREFIXES = ("https://", "http://", "ssh://", "git://", "file://", "git@")
 
 
-class ConfigError(Exception):
+class ConfigError(UserError):
     """A required setting is missing or malformed."""
 
 
@@ -62,6 +70,8 @@ class Settings:
     submit_url: str | None
     app_token: str | None
     submissions_repo: str | None
+    github_url: str = DEFAULT_GITHUB_URL
+    github_api_url: str = DEFAULT_GITHUB_API_URL
 
     @property
     def token_file(self) -> Path:
@@ -79,6 +89,8 @@ def load(environ: Mapping[str, str] | None = None) -> Settings:
         submit_url=_get(env, "GRADBOT_SUBMIT_URL"),
         app_token=_get(env, "GRADBOT_APP_TOKEN"),
         submissions_repo=_get(env, "GRADBOT_SUBMISSIONS_REPO"),
+        github_url=(_get(env, "GRADBOT_GITHUB_URL") or DEFAULT_GITHUB_URL).rstrip("/"),
+        github_api_url=(_get(env, "GRADBOT_GITHUB_API_URL") or DEFAULT_GITHUB_API_URL).rstrip("/"),
     )
 
 
@@ -86,6 +98,14 @@ def require(value: str | None, name: str, why: str) -> str:
     """Return ``value`` or stop with a message that names the variable and why it's needed."""
     if not value:
         raise ConfigError(f"{name} is not set. {why}")
+    return value
+
+
+def require_owner_repo(value: str | None, name: str, why: str) -> str:
+    """Like require(), and the value must be owner/repo."""
+    value = require(value, name, why)
+    if not is_owner_repo(value):
+        raise ConfigError(f"{name} is '{value}'. It must be owner/repo, for example acme/course-submissions.")
     return value
 
 

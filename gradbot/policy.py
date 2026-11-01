@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from gradbot.errors import UserError
 from gradbot.loader import public_bundle_files
 from gradbot.result import SuiteResult
 from gradbot.visibility import student_payload
@@ -76,7 +77,7 @@ jobs:
 """
 
 
-class PolicyError(Exception):
+class PolicyError(UserError):
     """A submit or publish rule refused the request."""
 
 
@@ -133,21 +134,33 @@ def credential_for(repo_role: str, student_token: str, app_token: str) -> str:
     return app_token
 
 
+def _roster_rows(text: str) -> list[dict]:
+    """The students list of roster.yml. Every row needs a numeric id."""
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise PolicyError(f"roster is not valid YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PolicyError("roster must be a mapping with a 'students' list")
+    rows = data.get("students") or []
+    if not isinstance(rows, list):
+        raise PolicyError("roster 'students' must be a list")
+    for row in rows:
+        user_id = row.get("id") if isinstance(row, dict) else None
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id < 1:
+            raise PolicyError(f"roster row {row!r} has no numeric GitHub id")
+    return rows
+
+
 def parse_roster(text: str) -> set[int]:
-    data = yaml.safe_load(text) or {}
-    return {int(row["id"]) for row in (data.get("students") or [])}
+    return {row["id"] for row in _roster_rows(text)}
 
 
 def add_roster_entry(text: str, login: str, user_id: int) -> str:
     """Insert or replace one student. The numeric id is the key."""
-    data = yaml.safe_load(text) or {}
-    students = [
-        row for row in (data.get("students") or [])
-        if int(row["id"]) != int(user_id)
-    ]
+    students = [row for row in _roster_rows(text) if row["id"] != int(user_id)]
     students.append({"id": int(user_id), "login": login})
-    dumped = yaml.safe_dump({"students": students}, sort_keys=False)
-    return dumped
+    return yaml.safe_dump({"students": students}, sort_keys=False)
 
 
 def safe_source_files(data: bytes, max_bytes: int = MAX_ZIP_BYTES) -> dict[str, bytes]:
