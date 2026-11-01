@@ -11,6 +11,7 @@ import os
 import py_compile
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -441,7 +442,9 @@ def get_run_command(compile_result: CompileResult) -> list[str]:
     lang = compile_result.language
 
     if lang == "python":
-        return ["python", compile_result.binary_path]
+        # The interpreter running GradBot, not whatever `python` is on PATH:
+        # pipx installs, Homebrew and stock Ubuntu have no `python` at all.
+        return [sys.executable, compile_result.binary_path]
     elif lang in ("c", "cpp"):
         return [compile_result.binary_path]
     elif lang == "java":

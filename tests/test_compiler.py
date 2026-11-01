@@ -1,7 +1,8 @@
 """Tests for gradbot.compiler — language detection and compilation."""
 
+import sys
 
-
+import gradbot
 from gradbot.compiler import (
     CompileResult,
     _extract_friendly_error,
@@ -9,6 +10,8 @@ from gradbot.compiler import (
     detect_language,
     get_run_command,
 )
+from gradbot.loader import CheckFunction, SuiteConfig
+from gradbot.runner import run_suite
 
 
 class TestDetectLanguage:
@@ -102,11 +105,6 @@ class TestFriendlyErrors:
 class TestGetRunCommand:
     """Test run command generation."""
 
-    def test_python(self):
-        cr = CompileResult(success=True, language="python", binary_path="solution.py")
-        cmd = get_run_command(cr)
-        assert cmd == ["python", "solution.py"]
-
     def test_c(self):
         cr = CompileResult(success=True, language="c", binary_path="./solution")
         cmd = get_run_command(cr)
@@ -121,3 +119,30 @@ class TestGetRunCommand:
         cr = CompileResult(success=False, language="c")
         cmd = get_run_command(cr)
         assert cmd == []
+
+
+class TestPythonInterpreter:
+    """Python solutions run under the interpreter running GradBot, not `python` on PATH."""
+
+    def test_run_command_uses_the_current_interpreter(self):
+        cr = CompileResult(success=True, language="python", binary_path="solution.py")
+        assert get_run_command(cr) == [sys.executable, "solution.py"]
+
+    def test_solution_passes_when_python_is_not_on_path(self, tmp_path, monkeypatch):
+        sol = tmp_path / "sol"
+        sol.mkdir()
+        (sol / "solution.py").write_text("print(input()[::-1])\n", encoding="utf-8")
+        monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+
+        def check():
+            result = gradbot.run(input="abc\n")
+            gradbot.expect_output(result.stdout, "cba")
+
+        result = run_suite(
+            SuiteConfig(name="Reverse", topic="Strings"),
+            [CheckFunction(func=check, name="reverses", slug="reverses")],
+            sol,
+            compile_solution(sol),
+            "practice",
+        )
+        assert result.checks[0].status == "pass", result.checks[0].cause
