@@ -13,8 +13,9 @@ from tests.toolchains import needs_gcc, needs_gxx, needs_jdk
 C_TWO_SUM = """\
 #include <stdio.h>
 int main(void) {
-    int n, target, a[1000];
-    if (scanf("%d", &n) != 1) return 1;
+    int n, target;
+    static int a[100000];
+    if (scanf("%d", &n) != 1 || n > 100000) return 1;
     for (int i = 0; i < n; i++) scanf("%d", &a[i]);
     scanf("%d", &target);
     for (int i = 0; i < n; i++)
@@ -111,3 +112,21 @@ def test_wrong_answer_fails_with_the_check_hint(tmp_path, capsys, filename, good
     code, out = _grade(tmp_path, filename, wrong, capsys)
     assert code == 1, out
     assert "Use a hash map" in out
+
+
+_BUNDLED_TWO_SUM = Path(__file__).resolve().parent.parent / "problems" / "arrays" / "two_sum"
+
+
+@pytest.mark.parametrize(("filename", "good", "broken"), CASES)
+def test_correct_solution_passes_the_bundled_problem_with_its_large_input(
+    tmp_path, capsys, filename, good, broken,
+):
+    # The bundled checks send 10,000 numbers; the small suite above sends four.
+    sol = tmp_path / "sol"
+    sol.mkdir()
+    (sol / filename).write_text(good, encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        grade_dev(_BUNDLED_TWO_SUM, sol, no_color=True)
+    out = capsys.readouterr().out
+    assert exc.value.code == 0, out
+    assert "Score: 4 / 4" in out
