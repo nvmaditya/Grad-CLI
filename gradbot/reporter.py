@@ -22,11 +22,11 @@ from typing import TextIO
 
 from gradbot.result import CheckResult, SuiteResult
 
-
 # ── Color support detection ───────────────────────────────────────────
 
-def _supports_color(stream: TextIO = sys.stdout) -> bool:
+def _supports_color(stream: TextIO | None = None) -> bool:
     """Detect whether the terminal supports ANSI color codes."""
+    stream = sys.stdout if stream is None else stream
     # Respect NO_COLOR convention: https://no-color.org/
     if os.environ.get("NO_COLOR"):
         return False
@@ -38,7 +38,7 @@ def _supports_color(stream: TextIO = sys.stdout) -> bool:
         # Modern Windows 10+ supports ANSI, enable it
         try:
             import ctypes
-            kernel32 = ctypes.windll.kernel32
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
             # Enable ANSI escape code processing
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
             return True
@@ -147,7 +147,7 @@ def render(
     suite_result: SuiteResult,
     verbose: bool = False,
     no_color: bool = False,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> None:
     """
     Render a SuiteResult to the terminal.
@@ -159,8 +159,9 @@ def render(
         suite_result: The complete suite result to render
         verbose: Show detailed logs and diffs on failure
         no_color: Force disable colors
-        stream: Output stream (default: stdout)
+        stream: Output stream (default: the current sys.stdout)
     """
+    stream = sys.stdout if stream is None else stream
     use_color = not no_color and _supports_color(stream)
     c = _Colors(enabled=use_color)
 
@@ -208,6 +209,8 @@ def render(
     ]
     if failed_with_hints and suite_result.score < 1.0:
         lines.append(c.dim("  Focus on the hints above and try again."))
+    if suite_result.general_hint and suite_result.score < 1.0:
+        lines.append(c.yellow(f"  💡 {suite_result.general_hint}"))
 
     lines.append("")
 
@@ -269,7 +272,7 @@ def render_compile_error(
     raw_error: str = "",
     verbose: bool = False,
     no_color: bool = False,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> None:
     """
     Render a compilation error to the terminal.
@@ -277,6 +280,7 @@ def render_compile_error(
     Shows the friendly message by default. With ``--verbose``, also shows
     the raw compiler output.
     """
+    stream = sys.stdout if stream is None else stream
     use_color = not no_color and _supports_color(stream)
     c = _Colors(enabled=use_color)
 
@@ -294,7 +298,7 @@ def render_compile_error(
             lines.append(c.dim(f"  │ {line}"))
 
     lines.append("")
-    lines.append(f"  Keep going — syntax errors happen to everyone! 🌱")
+    lines.append("  Keep going — syntax errors happen to everyone! 🌱")
     lines.append("")
 
     output = "\n".join(lines)

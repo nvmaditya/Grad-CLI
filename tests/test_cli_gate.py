@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from gradbot.cli import grade_dev, grade_student, main, save_login_token
+from gradbot.cli import grade_dev, grade_student, main
 from gradbot.compiler import compile_solution
 from gradbot.loader import CheckFunction, SuiteConfig
+from gradbot.remote import save_login_token
 from gradbot.runner import run_suite
 
 _SUITE = """\
@@ -102,8 +103,7 @@ def test_student_grade_runs_public_checks(tmp_path: Path, capsys):
 
 
 def test_legacy_submit_does_not_ask_for_a_token(capsys, monkeypatch):
-    import gradbot.resolver as resolver
-    monkeypatch.setattr(resolver, "GRADBOT_TOKEN", "ghp_leak")
+    monkeypatch.setenv("GRADBOT_TOKEN", "ghp_leak")
     with pytest.raises(SystemExit) as exc:
         main(["submit/arrays/two_sum", "--no-color"])
     assert exc.value.code == 1
@@ -152,3 +152,36 @@ def test_run_suite_forwards_docker_sandbox(tmp_path: Path, monkeypatch):
     assert seen["cmd"][0] == "docker"
     assert "--network" in seen["cmd"]
     assert "none" in seen["cmd"]
+
+
+def test_broken_checks_file_is_reported_without_blaming_the_student(tmp_path: Path, capsys):
+    suite, solution = _problem(tmp_path, hidden=False)
+    (suite / "checks.py").write_text("import gradbot\ndef broken(:\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main(["dev", str(suite), "--solution", str(solution), "--no-color"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "Error importing checks.py" in out
+    assert "unexpected problem" not in out
+
+
+def test_malformed_suite_yaml_is_reported_cleanly(tmp_path: Path, capsys):
+    suite, solution = _problem(tmp_path, hidden=False)
+    (suite / "suite.yaml").write_text("problem: [unclosed\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main(["dev", str(suite), "--solution", str(solution), "--no-color"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "suite.yaml" in out
+    assert "unexpected problem" not in out
+
+
+def test_malformed_practice_repo_setting_names_the_variable(tmp_path: Path, capsys, monkeypatch):
+    monkeypatch.setenv("GRADBOT_PUBLIC_REPO", "not a repo")
+    (tmp_path / "solution.py").write_text("print(1)\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main(["run", "arrays/two_sum", "--solution", str(tmp_path)])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "GRADBOT_PUBLIC_REPO is 'not a repo'" in out
+    assert "unexpected problem" not in out

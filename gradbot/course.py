@@ -1,8 +1,8 @@
-# Grade CLI — course files on a free GitHub organization.
-# Copyright (C) 2026 Grade CLI contributors
+# GradBot — course files on a free GitHub organization.
+# Copyright (C) 2026 Aditya Khandelwal
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""Classroom files for Grade CLI.
+"""Classroom files for GradBot.
 
 GitHub Free is the target. These files do not ask for a Team or Enterprise
 plan, and they do not use GitHub Pages. A later grader reads them from the

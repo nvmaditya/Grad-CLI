@@ -1,0 +1,654 @@
+# Grade CLI multi-session plan
+
+**Goal:** Build Grade CLI into a free course tool on a free GitHub organization: classrooms, roster, assignments, one graded submit, and scores, with no Team plan and no GitHub Pages.
+
+**Architecture:** The course is a private GitHub repo named `gradecli`. Classrooms are directories of JSON and CSV. Students get their own private repos. Grading runs in the course repo, checks out the student's tagged commit with a faculty token, and runs the existing `python -m gradbot dev` engine. Hidden checks never enter the student repo. The student repo has no workflow and no secret.
+
+**Tech Stack:** Python 3.10+, pytest, PyYAML (already required), GitHub REST, GitHub Actions, the existing `gradbot` package. No new dependency. No database. No web app until session 8.
+
+## Global Constraints
+
+- License stays `GPL-3.0-only`. New files get the SPDX line `GPL-3.0-only`.
+- Do not copy source from `foundation50/classroom50`. Read behavior, write new code.
+- Product name is Grade CLI. Command is `grade`. Python import stays `gradbot`.
+- Disk folder stays `the existing project folder` until the user renames it outside this session.
+- GitHub Free organization only. Do not call any URL containing `/pages`. Do not require `plan.name` of `team` or `enterprise`.
+- Actions spending limit is `0` dollars. Included private minutes are the free 2,000. A spike stops jobs.
+- Default submission mode stays `tag`. One grade per student per assignment.
+- Hidden checks stay in the course repo. A student repo must not contain `checks_hidden.py`, `checks.py`, or `.github/workflows`.
+- The faculty token lives only as the Actions secret `GRADE_APP_TOKEN` on `org/gradecli`. It is never written into a student repo.
+- Before the student program runs, the workflow unsets `GRADE_APP_TOKEN`, `GITHUB_TOKEN`, and `GRADBOT_APP_TOKEN`.
+- Student-visible grade text is the existing `status_comment()` in `gradbot/policy.py`. It includes hint, name, status, and points. It omits `cause` and `log`.
+- Practice (`grade run`, `grade dev`) stays. This plan does not replace it.
+- Commit only when the user asks. Each session still ends with a green pytest.
+- After code changes, run `graphify update .`.
+
+## How to resume
+
+Open this file. Run the first session whose exit box is unchecked. Finish that session. Stop. Do not start the next session in the same sitting unless the user says to continue.
+
+| Session | Exit | Status |
+| --- | --- | --- |
+| 0. Course files, GPL-3, `grade` command | `pytest tests/test_course.py` passes | done |
+| 1. Roster rows and assignment tests | `pytest tests/test_course.py` passes | done |
+| 2. Grade workflow text | `pytest tests/test_grade_workflow.py` passes | done |
+| 3. Push the course tree with git | `pytest tests/test_course_git.py` passes | next |
+| 4. Create the private course repo | `pytest tests/test_github_course.py` passes | |
+| 5. Teams and invites | `pytest tests/test_roster_github.py` passes | |
+| 6. Accept a starter repo | `pytest tests/test_accept.py` passes | |
+| 7. Tag, grade, collect scores | `pytest tests/test_grade_dispatch.py tests/test_scores.py` passes | |
+| 8. Web app | do not start until session 7's live check is checked | |
+
+## Skills by session
+
+| Session | Primary skills | Hard rule under test |
+| --- | --- | --- |
+| 1 | `test-driven-development`, ponytail | duplicate names refused; `pages` stays false |
+| 2 | `test-driven-development` | no Pages URL; token unset before the student program |
+| 3 | `test-driven-development` | pushed tree has no Pages file |
+| 4 | `test-driven-development` | create-repo body is private; no `/pages` call |
+| 5 | `test-driven-development` | user id comes from GitHub; a typed id is ignored |
+| 6 | `test-driven-development` | starter tree has no hidden checks |
+| 7 | `test-driven-development`, `verification-before-completion` | faculty token stays out of the student repo |
+| 8 | `design-taste-frontend` only after the CLI loop works | sign-in is a personal access token; no proxy |
+
+`docs/plans/2026-10-12-zero-rupee-grading.md` is an earlier sealed-pull-request design. Do not implement it in these sessions. The private course repo already keeps tests private.
+
+---
+
+### Session 1: Roster rows and assignment tests
+
+**Files:**
+- Modify: `gradbot/course.py`
+- Modify: `gradbot/cli.py` (`_cmd_course`, `_cmd_assignment`)
+- Test: `tests/test_course.py`
+
+**Interfaces:**
+- Consumes: `add_classroom()`, `add_assignment()`, `CourseError` in `gradbot/course.py`
+- Produces:
+  - `add_roster_row(root: Path, classroom: str, github_id: int, username: str, role: str = "student") -> None`
+  - `add_test(root: Path, classroom: str, assignment: str, test: dict) -> None`
+  - Test dict keys: `name: str`, `type: str` (`io` | `run` | `python`), `points: int`, optional `run`, `expected`, `input`, `timeout`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_course.py`:
+
+```python
+def test_roster_row_appends_csv(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    add_roster_row(tmp_path, "cs-fall", 42, "ada", "student")
+    text = (tmp_path / "cs-fall" / "roster.csv").read_text(encoding="utf-8")
+    assert text.splitlines()[1] == "42,ada,,,,,"
+
+
+def test_roster_rejects_a_typed_duplicate(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    add_roster_row(tmp_path, "cs-fall", 42, "ada")
+    with pytest.raises(CourseError, match="already"):
+        add_roster_row(tmp_path, "cs-fall", 42, "ada")
+
+
+def test_assignment_test_is_stored(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    add_assignment(tmp_path, "cs-fall", "hello", "Hello")
+    add_test(tmp_path, "cs-fall", "hello", {
+        "name": "prints hello",
+        "type": "io",
+        "run": "./hello",
+        "expected": "Hello",
+        "points": 2,
+    })
+    data = json.loads((tmp_path / "cs-fall" / "assignments.json").read_text(encoding="utf-8"))
+    meta = json.loads((tmp_path / "cs-fall" / "classroom.json").read_text(encoding="utf-8"))
+    assert data["assignments"][0]["tests"][0]["name"] == "prints hello"
+    assert meta["pages"] is False
+    assert meta["plan"] == "free"
+
+
+def test_assignment_test_name_is_unique(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    add_assignment(tmp_path, "cs-fall", "hello", "Hello")
+    body = {"name": "prints hello", "type": "run", "run": "gcc hello.c", "points": 1}
+    add_test(tmp_path, "cs-fall", "hello", body)
+    with pytest.raises(CourseError, match="already"):
+        add_test(tmp_path, "cs-fall", "hello", body)
+```
+
+- [ ] **Step 2: Run the tests and see them fail**
+
+Run: `uv run --with pytest --with pyyaml --with pytest-mock --with responses python -m pytest tests/test_course.py -q --tb=short`
+
+Expected: FAIL, `add_roster_row` is not defined.
+
+- [ ] **Step 3: Implement**
+
+Add to `gradbot/course.py`:
+
+```python
+_ROLES = {"student", "teacher", "head_ta", "ta"}
+_TEST_TYPES = {"io", "run", "python"}
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+
+
+def add_roster_row(root: Path, classroom: str, github_id: int, username: str, role: str = "student") -> None:
+    path = _classroom_dir(root, classroom) / "roster.csv"
+    if role not in _ROLES:
+        raise CourseError("role must be student, teacher, head_ta, or ta")
+    if not isinstance(github_id, int) or isinstance(github_id, bool) or github_id < 1:
+        raise CourseError("github_id must be a positive integer")
+    if not _USERNAME_RE.match(username):
+        raise CourseError("username is not a GitHub login")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for line in lines[1:]:
+        if line.split(",")[0] == str(github_id):
+            raise CourseError(f"{github_id} already on the roster")
+    lines.append(f"{github_id},{username},,,,,{role}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def add_test(root: Path, classroom: str, assignment: str, test: dict) -> None:
+    folder = _classroom_dir(root, classroom)
+    path = folder / "assignments.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    item = next((a for a in data["assignments"] if a["slug"] == assignment), None)
+    if item is None:
+        raise CourseError(f"no assignment {assignment}")
+    name = str(test.get("name", "")).strip()
+    kind = test.get("type")
+    points = test.get("points")
+    if not name:
+        raise CourseError("test name is required")
+    if kind not in _TEST_TYPES:
+        raise CourseError("test type must be io, run, or python")
+    if not isinstance(points, int) or isinstance(points, bool) or points < 0:
+        raise CourseError("points must be a non-negative integer")
+    if any(existing["name"] == name for existing in item["tests"]):
+        raise CourseError(f"{name} already exists")
+    stored = {"name": name, "type": kind, "points": points}
+    for key in ("run", "expected", "input", "timeout"):
+        if key in test and test[key] is not None:
+            stored[key] = test[key]
+    item["tests"].append(stored)
+    _write_json(path, data)
+
+
+def _classroom_dir(root: Path, classroom: str) -> Path:
+    folder = root / classroom
+    if not (folder / "classroom.json").is_file():
+        raise CourseError(f"no classroom {classroom}")
+    return folder
+```
+
+Use `_classroom_dir` inside `add_assignment` too, in place of the open-coded folder check.
+
+Wire CLI in `gradbot/cli.py`:
+
+```python
+def _cmd_course(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="grade course")
+    sub = parser.add_subparsers(dest="action", required=True)
+    add = sub.add_parser("add")
+    add.add_argument("slug")
+    add.add_argument("--name", required=True)
+    add.add_argument("--root", default="gradecli")
+    roster = sub.add_parser("roster-add")
+    roster.add_argument("slug")
+    roster.add_argument("--id", required=True, type=int)
+    roster.add_argument("--username", required=True)
+    roster.add_argument("--role", default="student")
+    roster.add_argument("--root", default="gradecli")
+    args = parser.parse_args(argv)
+    from gradbot.course import CourseError, add_classroom, add_roster_row
+    try:
+        if args.action == "add":
+            path = add_classroom(Path(args.root), args.slug, args.name)
+            print(f"Created {path}")
+        else:
+            add_roster_row(Path(args.root), args.slug, args.id, args.username, args.role)
+            print(f"Added {args.username} to {args.slug}")
+    except CourseError as exc:
+        print(f"❌ {exc}")
+        sys.exit(1)
+```
+
+Add `test-add` under `grade assignment` with `--name`, `--type`, `--points`, and optional `--run`, `--expected`. It calls `add_test`.
+
+- [ ] **Step 4: Run the tests**
+
+Run the same pytest command. Expected: PASS.
+
+- [ ] **Exit:** `pytest tests/test_course.py` passes. `classroom.json` still has `"pages": false`.
+
+---
+
+### Session 2: Grade workflow text
+
+**Files:**
+- Create: `gradbot/grade_workflow.py`
+- Test: `tests/test_grade_workflow.py`
+- Modify: `gradbot/policy.py` only if a shared constant is the least change. Prefer a new function over editing `WORKFLOW_TEXT`, which still serves `grade publish`.
+
+**Interfaces:**
+- Consumes: nothing from session 1 at runtime
+- Produces: `grade_workflow_text() -> str`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+from gradbot.grade_workflow import grade_workflow_text
+
+
+def test_workflow_grades_in_the_course_repo_and_hides_the_token():
+    text = grade_workflow_text()
+    assert "pages" not in text.lower()
+    assert "github.io" not in text
+    assert "GRADE_APP_TOKEN" in text
+    assert "actions/checkout@v4" in text
+    lowered = text.lower()
+    token_at = lowered.index("grade_app_token")
+    python_at = lowered.index("python -m gradbot dev")
+    assert token_at < python_at
+    tail = text[python_at - 400:python_at]
+    assert 'GRADE_APP_TOKEN: ""' in tail or "unset GRADE_APP_TOKEN" in tail
+    assert "checks_hidden.py" not in text.split("python -m gradbot dev", 1)[1]
+```
+
+The third assertion only checks the secret name appears before the python step. Tighten the implementation so the checkout step names `GRADE_APP_TOKEN` and the Grade step's `env` sets `GRADE_APP_TOKEN: ""`, `GITHUB_TOKEN: ""`, and `GRADBOT_APP_TOKEN: ""`.
+
+- [ ] **Step 2: Run it and see it fail**
+
+Run: `uv run --with pytest --with pyyaml python -m pytest tests/test_grade_workflow.py -q --tb=short`
+
+- [ ] **Step 3: Implement `grade_workflow_text`**
+
+```python
+def grade_workflow_text() -> str:
+    return """\
+name: grade
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        required: true
+        type: string
+      user_id:
+        required: true
+        type: string
+      repository:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grade-${{ inputs.user_id }}-${{ inputs.slug }}
+  cancel-in-progress: false
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the course
+        uses: actions/checkout@v4
+        with:
+          path: course
+
+      - name: Check out the student commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.GRADE_APP_TOKEN }}
+          path: submission
+
+      - name: Grade
+        env:
+          GRADE_APP_TOKEN: ""
+          GITHUB_TOKEN: ""
+          GRADBOT_APP_TOKEN: ""
+        run: python -m gradbot dev "course/${{ inputs.slug }}" --solution submission --sandbox docker --output faculty.json --student-output student.json
+"""
+```
+
+- [ ] **Step 4: Tests pass**
+
+- [ ] **Exit:** the workflow string has no Pages host, and the grade step's environment clears the three tokens.
+
+---
+
+### Session 3: Push the course tree
+
+**Files:**
+- Create: `gradbot/course_git.py`
+- Modify: `gradbot/cli.py` (`grade course push`)
+- Test: `tests/test_course_git.py`
+
+**Interfaces:**
+- Consumes: a `gradecli/` directory from session 1, `grade_workflow_text()` from session 2
+- Produces: `stage_course(root: Path, dest: Path) -> Path` copies `root` into `dest`, writes `.github/workflows/grade.yml` from `grade_workflow_text()`, and refuses to copy a file named `checks.py` or `checks_hidden.py` into a path that contains `starter`
+
+- [ ] **Step 1: Failing test**
+
+```python
+def test_stage_writes_the_workflow_and_skips_pages(tmp_path: Path):
+    src = tmp_path / "src"
+    add_classroom(src, "cs-fall", "CS Fall")
+    dest = tmp_path / "dest"
+    stage_course(src, dest)
+    workflow = (dest / ".github" / "workflows" / "grade.yml").read_text(encoding="utf-8")
+    assert "github.io" not in workflow
+    names = [p.name for p in dest.rglob("*")]
+    assert "pages" not in names
+    assert (dest / "cs-fall" / "classroom.json").is_file()
+```
+
+- [ ] **Step 2: See it fail**
+
+- [ ] **Step 3: Implement `stage_course` with `shutil.copytree` and a write of the workflow file. Create `dest` fresh. Raise `CourseError` if `dest` exists and is non-empty.**
+
+- [ ] **Step 4: Tests pass**
+
+- [ ] **Exit:** `grade course push --root gradecli --dest ./out` prints the dest path. Pushing to GitHub is session 4. This session only builds the tree.
+
+---
+
+### Session 4: Private course repo
+
+**Files:**
+- Create: `gradbot/github_api.py`
+- Modify: `gradbot/cli.py` (`grade org init`)
+- Test: `tests/test_github_course.py`
+
+**Interfaces:**
+- Consumes: a transport `(method: str, url: str, body: dict | None) -> tuple[int, dict]`
+- Produces:
+  - `class GitHub` with `create_course_repo(org: str) -> dict` and `set_spending_cap(org: str) -> str`
+  - `set_spending_cap` returns `"set"` on 200/201 and `"advisory"` on 403
+
+- [ ] **Step 1: Failing tests**
+
+```python
+def test_course_repo_is_private_and_never_enables_pages():
+    calls = []
+
+    def transport(method, url, body=None):
+        calls.append((method, url, body))
+        return 201, {"full_name": "acme/gradecli", "private": True}
+
+    repo = GitHub(transport).create_course_repo("acme")
+    assert repo["private"] is True
+    assert calls[0][0] == "POST"
+    assert calls[0][1] == "/orgs/acme/repos"
+    assert calls[0][2]["name"] == "gradecli"
+    assert calls[0][2]["private"] is True
+    assert all("/pages" not in url for _, url, _ in calls)
+
+
+def test_spending_cap_zero_is_advisory_when_billing_is_hidden():
+    def transport(method, url, body=None):
+        assert body["spending_limit"] == 0
+        return 403, {"message": "forbidden"}
+
+    assert GitHub(transport).set_spending_cap("acme") == "advisory"
+```
+
+- [ ] **Step 2: See them fail**
+
+- [ ] **Step 3: Implement**
+
+```python
+class GitHub:
+    def __init__(self, transport):
+        self._call = transport
+
+    def create_course_repo(self, org: str) -> dict:
+        status, body = self._call("POST", f"/orgs/{org}/repos", {
+            "name": "gradecli",
+            "private": True,
+            "auto_init": True,
+        })
+        if status not in (201, 422):
+            raise RuntimeError(f"create repo failed: {status} {body}")
+        return body
+
+    def set_spending_cap(self, org: str) -> str:
+        status, _body = self._call(
+            "PATCH",
+            f"/orgs/{org}/settings/billing/actions",
+            {"spending_limit": 0},
+        )
+        if status in (200, 201):
+            return "set"
+        if status == 403:
+            return "advisory"
+        raise RuntimeError(f"spending cap failed: {status}")
+```
+
+`422` means the repo already exists. Treat that as success and return the body the transport gave. The CLI prints `advisory` when the cap cannot be read, and still exits 0.
+
+- [ ] **Step 4: Tests pass**
+
+- [ ] **Exit:** a fake transport proves the client never requests Pages. Live `grade org init acme` is a manual check at the end of session 7, not a unit test.
+
+---
+
+### Session 5: Teams and invites
+
+**Files:**
+- Modify: `gradbot/github_api.py`
+- Modify: `gradbot/cli.py` (`grade roster invite`)
+- Test: `tests/test_roster_github.py`
+
+**Interfaces:**
+- Produces:
+  - `create_classroom_teams(org: str, classroom: str) -> dict[str, int]`
+  - `invite_username(org: str, classroom: str, username: str, team_id: int) -> int`
+- Team slugs: `gradecli-<classroom>`, `gradecli-<classroom>-teacher`, `gradecli-<classroom>-hta`, `gradecli-<classroom>-ta`
+- Student team `privacy` is `secret`. Staff teams `privacy` is `closed`.
+
+- [ ] **Step 1: Failing tests**
+
+```python
+def test_student_team_is_secret():
+    calls = []
+
+    def transport(method, url, body=None):
+        calls.append(body)
+        return 201, {"id": len(calls)}
+
+    teams = GitHub(transport).create_classroom_teams("acme", "cs-fall")
+    student = next(body for body in calls if body["name"] == "gradecli-cs-fall")
+    assert student["privacy"] == "secret"
+    assert teams["student"] == 1
+
+
+def test_invite_uses_the_id_github_returns(monkeypatch):
+    seen = {}
+
+    def transport(method, url, body=None):
+        if url == "/users/ada":
+            return 200, {"id": 99, "login": "ada"}
+        seen["body"] = body
+        return 201, {"id": 7}
+
+    user_id = GitHub(transport).invite_username("acme", "cs-fall", "ada", team_id=3)
+    assert user_id == 99
+    assert seen["body"]["invitee_id"] == 99
+    assert seen["body"]["team_ids"] == [3]
+```
+
+- [ ] **Step 2: See them fail**
+
+- [ ] **Step 3: Implement the two methods.** `invite_username` GETs `/users/{username}` and POSTs `/orgs/{org}/invitations`. It never reads an id from the caller except `team_id`. On success, call `add_roster_row` with the returned id so the CSV matches GitHub.
+
+- [ ] **Step 4: Tests pass**
+
+- [ ] **Exit:** a typed `--id` on `grade roster invite` is not an argument. The only id written is the one from `GET /users/{username}`.
+
+---
+
+### Session 6: Accept a starter repo
+
+**Files:**
+- Create: `gradbot/accept.py`
+- Modify: `gradbot/cli.py` (`grade accept`)
+- Test: `tests/test_accept.py`
+
+**Interfaces:**
+- Consumes: `validate_slug`, `MAX_REPO_PREFIX`
+- Produces: `repo_name(classroom: str, assignment: str, username: str) -> str` and `starter_tree(template: Path, dest: Path) -> None`
+- Repo name is `<classroom>-<assignment>-<username>` lowercased. Raise `CourseError` when the name is longer than 100 characters.
+- `starter_tree` copies the template and raises `CourseError` if the copy contains `checks_hidden.py` or a `.github/workflows` directory.
+
+- [ ] **Step 1: Failing tests**
+
+```python
+def test_repo_name_is_lowercase_and_bounded():
+    assert repo_name("CS-Fall", "Hello", "Ada") == "cs-fall-hello-ada"
+    with pytest.raises(CourseError):
+        repo_name("a" * 40, "b" * 30, "c" * 39)
+
+
+def test_starter_rejects_hidden_checks(tmp_path: Path):
+    template = tmp_path / "template"
+    (template / "checks_hidden.py").parent.mkdir(parents=True)
+    (template / "checks_hidden.py").write_text("x = 1\n", encoding="utf-8")
+    with pytest.raises(CourseError, match="hidden"):
+        starter_tree(template, tmp_path / "dest")
+```
+
+- [ ] **Step 2: See them fail**
+
+- [ ] **Step 3: Implement the two functions.** The CLI calls `GitHub` to `POST /orgs/{org}/repos` with `name` from `repo_name` and `"private": true`, then pushes `dest`. The unit tests cover the pure functions only. The HTTP call reuses `GitHub._call` through a new method `create_student_repo(org, name) -> dict` with the same no-`/pages` rule as session 4. Add that assertion to `tests/test_accept.py` with a fake transport.
+
+- [ ] **Step 4: Tests pass**
+
+- [ ] **Exit:** accepting a template that contains `checks_hidden.py` fails before any repo is created.
+
+---
+
+### Session 7: Tag, grade, collect
+
+**Files:**
+- Create: `gradbot/dispatch.py`
+- Create: `gradbot/scores.py`
+- Modify: `gradbot/cli.py` (`grade submit`, `grade collect`)
+- Test: `tests/test_grade_dispatch.py`, `tests/test_scores.py`
+
+**Interfaces:**
+- Consumes: `slot_ref()` and `status_comment()` from `gradbot/policy.py`, `grade_workflow_text()` from session 2
+- Produces:
+  - `submit_body(slug: str, user_id: int, repository: str, sha: str) -> dict`
+  - `record_score(root: Path, classroom: str, assignment: str, user_id: int, sha: str, points: int, total: int) -> None`
+
+- [ ] **Step 1: Failing tests**
+
+```python
+def test_submit_body_has_no_token_and_locks_one_slot():
+    body = submit_body("cs-fall/hello", 99, "acme/cs-fall-hello-ada", "abc123")
+    assert body["ref"] == "refs/gradbot/slots/cs-fall/hello/99"
+    assert body["inputs"]["sha"] == "abc123"
+    assert body["inputs"]["repository"] == "acme/cs-fall-hello-ada"
+    blob = json.dumps(body)
+    assert "GRADE_APP_TOKEN" not in blob
+    assert "checks_hidden" not in blob
+
+
+def test_scores_keep_points_and_drop_logs(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    record_score(tmp_path, "cs-fall", "hello", 99, "abc123", 2, 2)
+    saved = json.loads((tmp_path / "cs-fall" / "scores.json").read_text(encoding="utf-8"))
+    entry = saved["assignments"]["hello"]["entries"][0]
+    assert entry == {"user_id": 99, "sha": "abc123", "points": 2, "total": 2}
+    assert "cause" not in entry
+    assert "log" not in entry
+```
+
+- [ ] **Step 2: See them fail**
+
+- [ ] **Step 3: Implement**
+
+`submit_body` returns:
+
+```python
+{
+    "ref": slot_ref(slug, user_id),
+    "event_type": "grade",
+    "inputs": {
+        "slug": slug,
+        "user_id": str(user_id),
+        "repository": repository,
+        "sha": sha,
+    },
+}
+```
+
+`record_score` creates `scores.json` with `{"schema": "gradecli/scores/v1", "assignments": {}}` when missing. A second call for the same `user_id` and assignment replaces the entry. It does not append a second grade. That is the one-slot rule.
+
+`grade submit` keeps today's local file checks. When `GRADE_COURSE_REPO` is set, it POSTs `submit_body` to `/repos/{GRADE_COURSE_REPO}/dispatches` using the student token. The student token cannot read the course repo; the dispatch endpoint is the one write it needs. If GitHub returns 403, print the 403 and do not create the slot. The existing `GRADBOT_SUBMIT_URL` zip path stays for the old tests and is unused when `GRADE_COURSE_REPO` is set.
+
+- [ ] **Step 4: Unit tests pass**
+
+- [ ] **Step 5: Live check, once, on a free org**
+
+Do this only with the user's course org. Spending cap is 0.
+
+1. `grade org init <org>` creates private `gradecli` and prints `set` or `advisory` for the cap.
+2. Push the staged tree from session 3 to `gradecli`.
+3. Store the faculty fine-grained PAT as Actions secret `GRADE_APP_TOKEN` on that repo only.
+4. Enroll one user. Accept one starter. `grade submit` once.
+5. The student repo file list has no `checks_hidden.py` and no `.github/workflows`.
+6. The course workflow comment or `student.json` has points and a hint, and has no `cause` field.
+7. `scores.json` on `gradecli` has one entry.
+
+- [ ] **Exit:** the live check's seven lines are true, or the session stops with the first line that failed.
+
+---
+
+### Session 8: Web app
+
+Do not start this session until session 7's live check is checked.
+
+**Files:**
+- Create: `web/` as a static site the teacher can open from disk
+- No Cloudflare worker. No OAuth client secret in the browser.
+
+**Interfaces:**
+- The page reads a personal access token the teacher pastes. It calls `api.github.com` from the browser.
+- It lists classrooms by reading `gradecli/<slug>/classroom.json` through the Git contents API.
+- It does not fetch `github.io`.
+
+- [ ] **Step 1: One page test, served locally, that renders a classroom name from a fixture JSON file.**
+
+- [ ] **Step 2: Implement that page. Stop.** Roster editing, invites, and grading stay on the CLI until the user asks for them in the browser.
+
+- [ ] **Exit:** opening the page shows the fixture classroom name. The network log for that test contains no `workers.dev` and no `github.io`.
+
+---
+
+## Spec coverage
+
+| Requirement | Session |
+| --- | --- |
+| GPL-3, no Classroom 50 branding, rewrite | already true; sessions keep the SPDX line |
+| Free GitHub organization, no paid plan | 2, 4 |
+| Classrooms, assignments, roster | 0, 1, 5 |
+| Starter code without hidden tests | 6 |
+| Autograde on submit, not every push | 2, 7 |
+| Scores for the teacher | 7 |
+| $0 spending cap | 4, live check in 7 |
+| Web, with no hosted proxy | 8 |
+| Feedback pull requests, group teams, email invites, pause-and-regrade | after session 8, only if the user asks |
+
+## Self-review
+
+- `submit_body` uses `slot_ref()` so the lock string has one definition.
+- `pages` is a JSON boolean on the classroom file and a forbidden substring in workflow and HTTP tests. Those are different checks on purpose.
+- Session 8 has no implementation code because it must not start before the live grade. Its exit test is the fence.

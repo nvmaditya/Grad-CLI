@@ -7,19 +7,17 @@ catches all exceptions, and produces a SuiteResult.
 
 from __future__ import annotations
 
-import os
-import shutil
-import sys
 import tempfile
 import time
 import traceback
 from pathlib import Path
 
 from gradbot import api
-from gradbot.compiler import CompileResult, get_run_command
+from gradbot.compiler import CompileResult, get_run_command, restrict_languages
 from gradbot.loader import CheckFunction, SuiteConfig
-from gradbot.result import CheckResult, SuiteResult
-from gradbot.workspace import cd
+from gradbot.result import CheckResult, Mode, SuiteResult
+from gradbot.sandbox import IMAGES, container_command
+from gradbot.workspace import copy_solution
 
 
 def run_suite(
@@ -27,8 +25,9 @@ def run_suite(
     checks: list[CheckFunction],
     solution_dir: Path,
     compile_result: CompileResult,
-    mode: str,
+    mode: Mode,
     sandbox: str | None = None,
+    default_timeout: float | None = None,
 ) -> SuiteResult:
     """
     Execute all checks in dependency order and return a SuiteResult.
@@ -53,6 +52,9 @@ def run_suite(
     results: list[CheckResult] = []
     # Track status by slug for dependency resolution
     status_map: dict[str, str] = {}
+    compile_result = restrict_languages(compile_result, config.languages)
+    timeout = default_timeout or config.time_limit
+    general_hint = config.general_hint or None
 
     # ── If compilation failed, skip everything ─────────────────────
     if not compile_result.success:
@@ -61,7 +63,7 @@ def run_suite(
                 name=check.name,
                 slug=check.slug,
                 status="skip",
-                description=f"Skipped — your code needs to compile first",
+                description="Skipped — your code needs to compile first",
                 hint=compile_result.friendly_error or None,
                 points=check.points,
             ))
@@ -72,6 +74,7 @@ def run_suite(
             topic=config.topic,
             mode=mode,
             checks=results,
+            general_hint=general_hint,
         )
 
     # ── Build the run command ──────────────────────────────────────
@@ -97,7 +100,7 @@ def run_suite(
 
         # Run the check in isolation
         result = _run_single_check(
-            check, solution_dir, run_command, compile_result, sandbox=sandbox,
+            check, solution_dir, run_command, compile_result, sandbox=sandbox, timeout=timeout,
         )
         results.append(result)
         status_map[check.slug] = result.status
@@ -107,7 +110,14 @@ def run_suite(
         topic=config.topic,
         mode=mode,
         checks=results,
+        general_hint=general_hint,
     )
+
+
+def _time_limit_hint(limit: float, check_hint: str | None) -> str:
+    """Hint for a check that failed after its program was stopped at the time limit."""
+    advice = check_hint or "Look for a loop that never ends, or a step that is too slow."
+    return f"Your program was stopped at the {limit:g}-second time limit. {advice}"
 
 
 def _run_single_check(
@@ -116,6 +126,7 @@ def _run_single_check(
     run_command: list[str],
     compile_result: CompileResult,
     sandbox: str | None = None,
+    timeout: float | None = None,
 ) -> CheckResult:
     """
     Run a single check function in an isolated temp directory.
@@ -139,12 +150,22 @@ def _run_single_check(
                 run_command, solution_dir, work_dir, compile_result
             )
 
+            image = None
+            if sandbox == "docker" and adjusted_cmd:
+                # Inside the container the files are at /work, not at the host path.
+                adjusted_cmd = container_command(
+                    compile_result.language, Path(adjusted_cmd[-1]).name,
+                )
+                image = IMAGES[compile_result.language]
+
             # Set up the API context so run(), expect_output(), etc. work
             api.set_context(
                 solution_dir=solution_dir,
                 run_command=adjusted_cmd,
                 work_dir=work_dir,
                 sandbox=sandbox,
+                default_timeout=timeout,
+                image=image,
             )
 
             try:
@@ -165,7 +186,16 @@ def _run_single_check(
 
             except api.CheckFailure as e:
                 elapsed_ms = (time.perf_counter_ns() - start_time) // 1_000_000
-                hint = e.hint or check.hint or "Try reviewing your approach!"
+                # The hint passed to the failing call, then the check's own
+                # hint, then the generic one for that kind of failure.
+                hint = e.hint or check.hint or e.default_hint or "Try reviewing your approach!"
+                cause = str(e)
+                limit = api.timed_out_after()
+                if limit is not None:
+                    # An output mismatch after a timeout is really a timeout.
+                    cause = f"Timed out after {limit:g} s. {cause}"
+                    if not e.hint:
+                        hint = _time_limit_hint(limit, check.hint)
 
                 log_lines.append(f"CheckFailure: {e}")
                 if hasattr(e, "expected") and e.expected is not None:
@@ -179,7 +209,7 @@ def _run_single_check(
                     status="fail",
                     description=check.name,
                     hint=hint,
-                    cause=str(e),
+                    cause=cause,
                     duration_ms=elapsed_ms,
                     points=check.points,
                     log=log_lines,
@@ -188,7 +218,14 @@ def _run_single_check(
             except AssertionError as e:
                 # Support plain assert statements in checks
                 elapsed_ms = (time.perf_counter_ns() - start_time) // 1_000_000
-                hint = check.hint or str(e) or "One of the assertions in this check failed."
+                # The assert message can contain the expected answer, so it
+                # goes to cause (faculty only), never to the hint.
+                hint = check.hint or "One of the assertions in this check failed."
+                cause = str(e) or "Assertion failed"
+                limit = api.timed_out_after()
+                if limit is not None:
+                    cause = f"Timed out after {limit:g} s. {cause}"
+                    hint = _time_limit_hint(limit, check.hint)
                 log_lines.append(f"AssertionError: {e}")
 
                 return CheckResult(
@@ -197,7 +234,7 @@ def _run_single_check(
                     status="fail",
                     description=check.name,
                     hint=hint,
-                    cause=str(e) or "Assertion failed",
+                    cause=cause,
                     duration_ms=elapsed_ms,
                     points=check.points,
                     log=log_lines,
@@ -242,18 +279,8 @@ def _run_single_check(
 def _copy_solution_files(
     solution_dir: Path, work_dir: Path, compile_result: CompileResult
 ) -> None:
-    """Copy the student's files into the isolated working directory."""
-    for item in solution_dir.iterdir():
-        if item.name.startswith("."):
-            continue  # skip hidden files
-        if item.name == "__pycache__":
-            continue
-
-        dest = work_dir / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest, dirs_exist_ok=True)
-        else:
-            shutil.copy2(item, dest)
+    """Copy the student's files (and any build output beside them) into the work dir."""
+    copy_solution(solution_dir, work_dir)
 
 
 def _adjust_command_for_workdir(

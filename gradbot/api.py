@@ -21,11 +21,12 @@ import os
 import re
 import subprocess
 import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from gradbot.sandbox import container_argv
+from gradbot.sandbox import IMAGES, container_argv, kill
 
 
 class CheckFailure(Exception):
@@ -36,9 +37,10 @@ class CheckFailure(Exception):
     information they get — no diffs, no expected output.
     """
 
-    def __init__(self, message: str, hint: str | None = None):
+    def __init__(self, message: str, hint: str | None = None, default_hint: str | None = None):
         super().__init__(message)
-        self.hint = hint
+        self.hint = hint                    # written by the check author for this failure
+        self.default_hint = default_hint    # generic; used only if the check has no hint either
         self.expected: str | None = None
         self.actual: str | None = None
 
@@ -53,11 +55,10 @@ class OutputMismatch(CheckFailure):
         hint: str | None = None,
         mode: str = "exact",
     ):
-        if hint is None:
-            hint = "Your output doesn't match what was expected. Check the format!"
         super().__init__(
             f"Expected {_truncate(expected)}, got {_truncate(actual)}",
             hint=hint,
+            default_hint="Your output doesn't match what was expected. Check the format!",
         )
         self.expected = expected
         self.actual = actual
@@ -85,7 +86,14 @@ def _get_context():
         "run_command": getattr(_context, "run_command", None),
         "work_dir": getattr(_context, "work_dir", None),
         "sandbox": getattr(_context, "sandbox", None),
+        "default_timeout": getattr(_context, "default_timeout", None),
+        "image": getattr(_context, "image", None),
     }
+
+
+def timed_out_after() -> float | None:
+    """The time limit, in seconds, of a run in the current check that was stopped, else None."""
+    return getattr(_context, "timed_out_after", None)
 
 
 def set_context(
@@ -93,12 +101,17 @@ def set_context(
     run_command: list[str],
     work_dir: Path,
     sandbox: str | None = None,
+    default_timeout: float | None = None,
+    image: str | None = None,
 ) -> None:
     """Set the context for the current check. Called by runner.py."""
     _context.solution_dir = solution_dir
     _context.run_command = run_command
     _context.work_dir = work_dir
     _context.sandbox = sandbox
+    _context.default_timeout = default_timeout
+    _context.image = image
+    _context.timed_out_after = None
 
 
 def clear_context() -> None:
@@ -107,18 +120,26 @@ def clear_context() -> None:
     _context.run_command = None
     _context.work_dir = None
     _context.sandbox = None
+    _context.default_timeout = None
+    _context.image = None
+    _context.timed_out_after = None
 
 
 # ── Public API functions ──────────────────────────────────────────────
 
 
-def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) -> RunResult:
+DEFAULT_TIMEOUT = 5.0
+
+
+def run(input: str = "", timeout: float | None = None, args: list[str] | None = None) -> RunResult:
     """
     Run the student's program with the given stdin input.
 
     Args:
         input: String to feed to stdin (newlines separate lines)
-        timeout: Maximum seconds to wait before killing the process
+        timeout: Maximum seconds to wait before killing the process. When
+            omitted: ``--timeout`` if given, else suite.yaml ``time_limit``,
+            else 5 seconds.
         args: Additional command-line arguments to pass to the program
 
     Returns:
@@ -137,21 +158,32 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
             hint="Make sure your solution file is in the right place!",
         )
 
+    if timeout is None:
+        timeout = ctx["default_timeout"] or DEFAULT_TIMEOUT
+
     full_cmd = list(cmd)
     if args:
         full_cmd.extend(args)
+    container = None
     if ctx["sandbox"] == "docker":
-        full_cmd = container_argv(Path(work_dir), full_cmd)
+        container = f"gradbot-{uuid.uuid4().hex[:12]}"
+        full_cmd = container_argv(
+            Path(work_dir), full_cmd, image=ctx["image"] or IMAGES["python"], name=container,
+        )
 
-    timed_out = False
     try:
         result = subprocess.run(
             full_cmd,
             input=input,
             capture_output=True,
-            text=True,
+            # Decode as UTF-8 whatever the locale is, and never raise on
+            # bytes that aren't UTF-8: a garbled answer is a wrong answer,
+            # not a grader crash.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             cwd=str(work_dir),
+            env=_child_env(),
         )
         return RunResult(
             stdout=result.stdout,
@@ -160,9 +192,14 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
             timed_out=False,
         )
     except subprocess.TimeoutExpired as e:
+        if container:
+            # Killing the docker client leaves the container running.
+            kill(container)
+        # The runner tells the student about the time limit if the check fails.
+        _context.timed_out_after = timeout
         return RunResult(
-            stdout=e.stdout or "" if isinstance(e.stdout, str) else (e.stdout.decode("utf-8", errors="replace") if e.stdout else ""),
-            stderr=e.stderr or "" if isinstance(e.stderr, str) else (e.stderr.decode("utf-8", errors="replace") if e.stderr else ""),
+            stdout=_as_text(e.stdout),
+            stderr=_as_text(e.stderr),
             exit_code=-1,
             timed_out=True,
         )
@@ -170,7 +207,7 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
         raise CheckFailure(
             f"Couldn't run the program: {e}",
             hint="Something went wrong trying to run your code. Ask your teacher for help!",
-        )
+        ) from e
 
 
 def expect_output(
@@ -224,13 +261,15 @@ def expect_exit(result: RunResult, code: int = 0, hint: str | None = None) -> No
     if result.timed_out:
         raise CheckFailure(
             f"Program timed out (expected exit code {code})",
-            hint=hint or "Your program took too long! Make sure it exits cleanly.",
+            hint=hint,
+            default_hint="Your program took too long! Make sure it exits cleanly.",
         )
 
     if result.exit_code != code:
         raise CheckFailure(
             f"Expected exit code {code}, got {result.exit_code}",
-            hint=hint or (
+            hint=hint,
+            default_hint=(
                 f"Your program exited with code {result.exit_code} instead of {code}.\n"
                 "An exit code of 0 means success. Check for errors in your code!"
             ),
@@ -258,7 +297,8 @@ def file_exists(filename: str, hint: str | None = None) -> None:
     if not filepath.exists():
         raise CheckFailure(
             f"File '{filename}' not found",
-            hint=hint or f"Make sure you have a file called '{filename}' in your solution folder.",
+            hint=hint,
+            default_hint=f"Make sure you have a file called '{filename}' in your solution folder.",
         )
 
 
@@ -288,14 +328,38 @@ def expect_sequence(
     if actual_tokens == expected_tokens:
         return
 
-    raise OutputMismatch(
-        " ".join(expected_tokens),
-        " ".join(actual_tokens),
-        hint=hint or "Your output sequence doesn't match. Check the order and values!",
-    )
+    mismatch = OutputMismatch(" ".join(expected_tokens), " ".join(actual_tokens), hint=hint)
+    mismatch.default_hint = "Your output sequence doesn't match. Check the order and values!"
+    raise mismatch
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
+
+
+# Variable names containing any of these never reach the student program.
+# Faculty run `grade dev` on untrusted code with GRADBOT_APP_TOKEN exported.
+_SECRET_NAME_PARTS = ("TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "API_KEY", "PRIVATE_KEY")
+
+
+def _child_env() -> dict[str, str]:
+    """Environment for the student program: no secrets, UTF-8 stdio, no bytecode files."""
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not any(part in name.upper() for part in _SECRET_NAME_PARTS)
+    }
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def _as_text(data: str | bytes | None) -> str:
+    """Partial output from a timed-out process may arrive as bytes or str."""
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data
 
 
 def _truncate(s: str, max_len: int = 80) -> str:

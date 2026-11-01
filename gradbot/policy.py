@@ -15,13 +15,25 @@ from pathlib import Path
 
 import yaml
 
+from gradbot import __version__
+from gradbot.errors import UserError
 from gradbot.loader import public_bundle_files
 from gradbot.result import SuiteResult
+from gradbot.sandbox import JAVA_RELEASE
 from gradbot.visibility import student_payload
 
 MAX_ZIP_BYTES = 1_048_576
-_ALLOWED_EXTENSIONS = {".py", ".c", ".h", ".cpp", ".cc", ".hpp", ".java"}
+# Every extension the compiler builds, plus C and C++ headers.
+_ALLOWED_EXTENSIONS = {".py", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".java"}
 
+# Where the grader installs GradBot from. Override per course with the
+# repository variable GRADBOT_PIP_SPEC (for example a fork or a commit).
+INSTALL_SPEC = f"gradbot @ git+https://github.com/nvmaditya/gradbot@v{__version__}"
+
+# Inputs reach the shell only through env, never as ${{ inputs.* }} inside
+# run:, so a crafted slug cannot inject commands. Checkouts do not persist
+# credentials, and the grade step clears every token before the student
+# program starts.
 WORKFLOW_TEXT = """\
 name: grade
 
@@ -29,7 +41,7 @@ on:
   workflow_dispatch:
     inputs:
       slug:
-        description: Problem slug
+        description: Problem slug, such as arrays/two_sum
         required: true
         type: string
       user_id:
@@ -54,29 +66,67 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out hidden tests
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: tests
+          persist-credentials: false
 
       - name: Check out the submission
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ vars.GRADBOT_SUBMISSIONS_REPO }}
           token: ${{ secrets.GRADBOT_APP_TOKEN }}
           path: submission
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Java is compiled here and run on the sandbox image's JRE.
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "@JAVA_RELEASE@"
+
+      - name: Install GradBot
+        env:
+          GRADBOT_PIP_SPEC: ${{ vars.GRADBOT_PIP_SPEC || '@INSTALL_SPEC@' }}
+        run: python -m pip install "$GRADBOT_PIP_SPEC"
 
       - name: Grade
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ""
-          GRADBOT_SANDBOX: docker
+          GRADBOT_APP_TOKEN: ""
+          SLUG: ${{ inputs.slug }}
+          SUBMISSION_PATH: ${{ inputs.submission_path }}
         run: |
+          case "$SLUG/$SUBMISSION_PATH" in *..*) echo "refusing a path with .."; exit 1;; esac
           # docker run --rm --network none mounts only the solution directory.
           # checks_hidden.py stays in this process and is not mounted into the container.
-          python -m gradbot dev "tests/${{ inputs.slug }}" --solution "submission/${{ inputs.submission_path }}" --sandbox docker --output faculty.json --student-output student.json
-"""
+          python -m gradbot dev "tests/$SLUG" --solution "submission/$SUBMISSION_PATH" --sandbox docker --output faculty.json --student-output student.json
+
+      - name: Check that grading finished
+        # The Grade step may fail because the student's program did; that is
+        # a finished grade. A missing student.json means the grader itself broke.
+        run: test -f student.json || { echo "::error::grading did not finish; see the Grade step"; exit 1; }
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: grade-${{ inputs.user_id }}-${{ github.run_id }}
+          path: |
+            faculty.json
+            student.json
+          if-no-files-found: warn
+""".replace("@INSTALL_SPEC@", INSTALL_SPEC).replace("@JAVA_RELEASE@", str(JAVA_RELEASE))
 
 
-class PolicyError(Exception):
+class PolicyError(UserError):
     """A submit or publish rule refused the request."""
 
 
@@ -119,35 +169,33 @@ def device_code_body(client_id: str) -> dict:
     return {"client_id": client_id, "scope": "read:user"}
 
 
-def student_can_read_private_repo(scope: str) -> bool:
-    return "repo" in scope.split()
-
-
-def credential_for(repo_role: str, student_token: str, app_token: str) -> str:
-    """Tests and submissions are read with the App token, never the student token."""
-    del student_token
-    if repo_role != "tests":
-        raise PolicyError(f"unknown repo role {repo_role}")
-    if not app_token:
-        raise PolicyError("tests repo requires the App token")
-    return app_token
+def _roster_rows(text: str) -> list[dict]:
+    """The students list of roster.yml. Every row needs a numeric id."""
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise PolicyError(f"roster is not valid YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PolicyError("roster must be a mapping with a 'students' list")
+    rows = data.get("students") or []
+    if not isinstance(rows, list):
+        raise PolicyError("roster 'students' must be a list")
+    for row in rows:
+        user_id = row.get("id") if isinstance(row, dict) else None
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id < 1:
+            raise PolicyError(f"roster row {row!r} has no numeric GitHub id")
+    return rows
 
 
 def parse_roster(text: str) -> set[int]:
-    data = yaml.safe_load(text) or {}
-    return {int(row["id"]) for row in (data.get("students") or [])}
+    return {row["id"] for row in _roster_rows(text)}
 
 
 def add_roster_entry(text: str, login: str, user_id: int) -> str:
     """Insert or replace one student. The numeric id is the key."""
-    data = yaml.safe_load(text) or {}
-    students = [
-        row for row in (data.get("students") or [])
-        if int(row["id"]) != int(user_id)
-    ]
+    students = [row for row in _roster_rows(text) if row["id"] != int(user_id)]
     students.append({"id": int(user_id), "login": login})
-    dumped = yaml.safe_dump({"students": students}, sort_keys=False)
-    return dumped
+    return yaml.safe_dump({"students": students}, sort_keys=False)
 
 
 def safe_source_files(data: bytes, max_bytes: int = MAX_ZIP_BYTES) -> dict[str, bytes]:
@@ -215,7 +263,14 @@ def submit_once(
     return SubmitResult(True, "accepted", ident.user_id, ident.login, ref, True)
 
 
-def accept_zip(ops, token: str, slug: str, zip_bytes: bytes, roster: set[int], body_login: str | None = None) -> SubmitResult:
+def accept_zip(
+    ops,
+    token: str,
+    slug: str,
+    zip_bytes: bytes,
+    roster: set[int],
+    body_login: str | None = None,
+) -> SubmitResult:
     """Validate the zip before the slot ref exists."""
     files = safe_source_files(zip_bytes)
     return submit_once(ops, token, slug, files, roster, body_login)
@@ -227,18 +282,37 @@ def reset_slot(ops, slug: str, user_id: int) -> None:
 
 
 def publish_suite(suite_dir: Path, tests_dir: Path, samples_dir: Path) -> None:
-    """Copy a problem. Hidden checks stay in the tests tree only."""
+    """Copy a problem. Hidden checks stay in the tests tree only.
+
+    The tests tree gets every file and folder (such as ``expected/``) except
+    ``sample_solution``. The samples tree gets suite.yaml, statement.md and
+    checks.py, nothing else.
+    """
     suite_dir = Path(suite_dir)
     tests_dir = Path(tests_dir)
     samples_dir = Path(samples_dir)
     tests_dir.mkdir(parents=True, exist_ok=True)
     samples_dir.mkdir(parents=True, exist_ok=True)
     for path in suite_dir.iterdir():
-        if not path.is_file() or path.name == "sample_solution":
+        if path.name == "sample_solution" or path.name.startswith(".") or path.name == "__pycache__":
             continue
-        shutil.copy2(path, tests_dir / path.name)
+        if path.is_dir():
+            shutil.copytree(
+                path, tests_dir / path.name, dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns(".*", "__pycache__"),
+            )
+        else:
+            shutil.copy2(path, tests_dir / path.name)
     for path in public_bundle_files(suite_dir):
         shutil.copy2(path, samples_dir / path.name)
+
+
+def hidden_files_in(samples_root: Path) -> list[str]:
+    """Any checks_hidden.py under a public samples tree, as paths relative to it."""
+    root = Path(samples_root)
+    if not root.is_dir():
+        return []
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("checks_hidden.py"))
 
 
 def install_grader_workflow(tests_repo: Path) -> Path:

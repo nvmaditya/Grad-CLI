@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e ".[dev]"
+      - name: ruff
+        run: ruff check gradbot tests
+      - name: mypy
+        run: mypy
+
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python: "3.12"
+    env:
+      # Fail, don't skip, if a compiler the language tests need is missing.
+      GRADBOT_REQUIRE_TOOLCHAINS: gcc,g++,jdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: python -m pip install -e ".[dev]"
+      - name: Offline test suite with coverage
+        run: python -m pytest -m "not docker and not live" --cov --cov-report=term-missing --cov-fail-under=90
+
+  docker:
+    name: Docker sandbox
+    runs-on: ubuntu-latest
+    env:
+      GRADBOT_REQUIRE_TOOLCHAINS: docker,gcc,jdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # Deliberately newer than the sandbox image's Java 21 JRE: the Java
+      # container test then fails if GradBot stops compiling for that JRE.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+      - run: python -m pip install -e ".[dev]"
+      - name: Sandbox tests against the runner's Docker daemon
+        run: python -m pytest -m docker -v
+
+  package:
+    name: Wheel installs and grades
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel
+      - name: Install it into a clean venv and grade a bundled problem
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/clean/bin/grade --version
+          /tmp/clean/bin/grade dev "$GITHUB_WORKSPACE/problems/arrays/two_sum" \
+            --solution "$GITHUB_WORKSPACE/problems/arrays/two_sum/sample_solution" --no-color

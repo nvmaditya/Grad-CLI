@@ -7,14 +7,17 @@ into short student-facing messages — raw compiler output is only shown with ``
 
 from __future__ import annotations
 
-import glob
+import ast
 import os
-import py_compile
 import re
 import subprocess
+import sys
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+
+from gradbot.errors import UserError
+from gradbot.sandbox import JAVA_RELEASE
 
 
 @dataclass(slots=True)
@@ -84,7 +87,7 @@ def _find_source_files(solution_dir: Path, language: str) -> list[Path]:
         "java": [".java"],
     }
     extensions = ext_map.get(language, [])
-    files = []
+    files: list[Path] = []
     for ext in extensions:
         files.extend(solution_dir.glob(f"*{ext}"))
     return sorted(files)
@@ -153,13 +156,17 @@ def _extract_friendly_error(raw_error: str, language: str) -> str:
         )
 
 
-def compile_solution(solution_dir: Path, language: str | None = None) -> CompileResult:
+def compile_solution(
+    solution_dir: Path, language: str | None = None, for_docker: bool = False,
+) -> CompileResult:
     """
     Compile the student's solution.
 
     Args:
         solution_dir: Path to the directory containing the student's code
         language: Override language detection (if None, auto-detect)
+        for_docker: Build for the sandbox images: link C/C++ statically (Linux
+            only) and compile Java for the image's JRE (``--release``)
 
     Returns:
         CompileResult with success status, binary path, and error info
@@ -196,11 +203,11 @@ def compile_solution(solution_dir: Path, language: str | None = None) -> Compile
     if language == "python":
         return _compile_python(solution_dir, source_files, source_names)
     elif language == "c":
-        return _compile_c(solution_dir, source_files, source_names)
+        return _compile_c(solution_dir, source_files, source_names, for_docker)
     elif language == "cpp":
-        return _compile_cpp(solution_dir, source_files, source_names)
+        return _compile_cpp(solution_dir, source_files, source_names, for_docker)
     elif language == "java":
-        return _compile_java(solution_dir, source_files, source_names)
+        return _compile_java(solution_dir, source_files, source_names, for_docker)
     else:
         return CompileResult(
             success=False,
@@ -209,22 +216,69 @@ def compile_solution(solution_dir: Path, language: str | None = None) -> Compile
         )
 
 
+# A folder with several .py files runs the first of these that exists.
+_PYTHON_ENTRY_NAMES = ("solution.py", "main.py")
+
+
+def _python_entry_point(source_files: list[Path]) -> Path | None:
+    """Pick the file to run: solution.py, main.py, the only file, or the only main guard."""
+    by_name = {f.name: f for f in source_files}
+    for name in _PYTHON_ENTRY_NAMES:
+        if name in by_name:
+            return by_name[name]
+    if len(source_files) == 1:
+        return source_files[0]
+    guarded = [f for f in source_files if _has_main_guard(f)]
+    if len(guarded) == 1:
+        return guarded[0]
+    return None
+
+
+def _has_main_guard(path: Path) -> bool:
+    """True if the file has a top-level ``if __name__ == "__main__":``.
+
+    Parsed, not searched: a comment or string that mentions __main__ does not count.
+    """
+    try:
+        tree = ast.parse(path.read_bytes())
+    except (SyntaxError, ValueError):
+        return False
+    for node in tree.body:
+        test = node.test if isinstance(node, ast.If) else None
+        if not (isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)):
+            continue
+        sides = (test.left, test.comparators[0])
+        if any(isinstance(n, ast.Name) and n.id == "__name__" for n in sides) and any(
+            isinstance(n, ast.Constant) and n.value == "__main__" for n in sides
+        ):
+            return True
+    return False
+
+
 def _compile_python(
     solution_dir: Path, source_files: list[Path], source_names: list[str]
 ) -> CompileResult:
-    """Syntax-check Python files using py_compile."""
-    errors = []
-    main_file = None
+    """Syntax-check Python files with the built-in compile(). Writes nothing to disk."""
+    main_file = _python_entry_point(source_files)
+    if main_file is None:
+        return CompileResult(
+            success=False,
+            language="python",
+            friendly_error=(
+                f"GradBot found several Python files ({', '.join(source_names)}) "
+                "and doesn't know which one to run.\n"
+                "Name the file to run solution.py (or main.py)."
+            ),
+            source_files=source_names,
+        )
 
+    errors = []
     for src in source_files:
         try:
-            py_compile.compile(str(src), doraise=True)
-        except py_compile.PyCompileError as e:
-            errors.append(str(e))
-
-        # Look for the main script
-        if main_file is None:
-            main_file = src
+            compile(src.read_bytes(), src.name, "exec", dont_inherit=True)
+        except (SyntaxError, ValueError) as e:
+            # ValueError: null bytes in the source on Python < 3.12.
+            errors.append("".join(traceback.format_exception_only(type(e), e)).rstrip())
 
     if errors:
         raw = "\n".join(errors)
@@ -245,7 +299,7 @@ def _compile_python(
 
 
 def _compile_c(
-    solution_dir: Path, source_files: list[Path], source_names: list[str]
+    solution_dir: Path, source_files: list[Path], source_names: list[str], static: bool = False
 ) -> CompileResult:
     """Compile C files using gcc."""
     output_binary = solution_dir / "solution"
@@ -257,6 +311,7 @@ def _compile_c(
         *[str(f) for f in source_files],
         "-o", str(output_binary),
         "-lm",
+        *(["-static"] if static else []),
     ]
 
     try:
@@ -304,7 +359,7 @@ def _compile_c(
 
 
 def _compile_cpp(
-    solution_dir: Path, source_files: list[Path], source_names: list[str]
+    solution_dir: Path, source_files: list[Path], source_names: list[str], static: bool = False
 ) -> CompileResult:
     """Compile C++ files using g++."""
     output_binary = solution_dir / "solution"
@@ -316,6 +371,7 @@ def _compile_cpp(
         *[str(f) for f in source_files],
         "-o", str(output_binary),
         "-std=c++17",
+        *(["-static"] if static else []),
     ]
 
     try:
@@ -363,10 +419,11 @@ def _compile_cpp(
 
 
 def _compile_java(
-    solution_dir: Path, source_files: list[Path], source_names: list[str]
+    solution_dir: Path, source_files: list[Path], source_names: list[str], for_docker: bool = False
 ) -> CompileResult:
-    """Compile Java files using javac."""
-    cmd = ["javac", *[str(f) for f in source_files]]
+    """Compile Java files using javac; for Docker, for the image's JRE."""
+    release = ["--release", str(JAVA_RELEASE)] if for_docker else []
+    cmd = ["javac", *release, *[str(f) for f in source_files]]
 
     try:
         result = subprocess.run(
@@ -392,6 +449,14 @@ def _compile_java(
             language="java",
             friendly_error="Compilation took too long — that shouldn't happen!",
             source_files=source_names,
+        )
+
+    too_old = re.search(r"release version \d+ not supported", result.stderr)
+    if result.returncode != 0 and for_docker and too_old:
+        # The grader's JDK is too old; the student's code never reached the compiler.
+        raise UserError(
+            f"Grading Java in the Docker sandbox needs JDK {JAVA_RELEASE} or newer on this "
+            f"machine: javac {' '.join(release)} failed with: {result.stderr.splitlines()[0]}"
         )
 
     if result.returncode != 0:
@@ -427,6 +492,30 @@ def _find_java_main_class(solution_dir: Path, source_files: list[Path]) -> str |
     return None
 
 
+_DISPLAY = {"python": "Python", "c": "C", "cpp": "C++", "java": "Java"}
+
+
+def _join(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def restrict_languages(compile_result: CompileResult, allowed: list[str]) -> CompileResult:
+    """Turn a successful build in a language the problem doesn't accept into a failure."""
+    if not compile_result.success or compile_result.language in allowed:
+        return compile_result
+    found = _DISPLAY.get(compile_result.language, compile_result.language)
+    files = ", ".join(compile_result.source_files)
+    return CompileResult(
+        success=False,
+        language=compile_result.language,
+        friendly_error=(
+            f"This problem accepts {_join([_DISPLAY.get(a, a) for a in allowed])}. "
+            f"Your folder has {found} ({files})."
+        ),
+        source_files=compile_result.source_files,
+    )
+
+
 def get_run_command(compile_result: CompileResult) -> list[str]:
     """
     Get the command to run the compiled student solution.
@@ -443,7 +532,9 @@ def get_run_command(compile_result: CompileResult) -> list[str]:
     lang = compile_result.language
 
     if lang == "python":
-        return ["python", compile_result.binary_path]
+        # The interpreter running GradBot, not whatever `python` is on PATH:
+        # pipx installs, Homebrew and stock Ubuntu have no `python` at all.
+        return [sys.executable, compile_result.binary_path]
     elif lang in ("c", "cpp"):
         return [compile_result.binary_path]
     elif lang == "java":

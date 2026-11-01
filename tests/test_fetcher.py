@@ -1,11 +1,10 @@
 """Tests for gradbot.fetcher — git-based test suite fetching."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from gradbot.fetcher import fetch, fetch_local, FetchError
+from gradbot.fetcher import FetchError, fetch, fetch_local
 from gradbot.git import GitError
 from gradbot.resolver import ResolvedSlug
 
@@ -15,8 +14,7 @@ def _make_slug(
     topic="arrays",
     problem="two_sum",
     ref="main",
-    repo="GradBot/gradbot-problems-public",
-    token=None,
+    repo="acme/samples",
 ) -> ResolvedSlug:
     """Helper to create a ResolvedSlug for tests."""
     return ResolvedSlug(
@@ -25,16 +23,8 @@ def _make_slug(
         problem=problem,
         ref=ref,
         repo=repo,
-        token=token,
         raw_slug=f"{mode}/{topic}/{problem}",
     )
-
-
-@pytest.fixture(autouse=True)
-def _use_tmp_local_dir(tmp_path, monkeypatch):
-    """Redirect GRADBOT_LOCAL_DIR to a temp path for all tests."""
-    import gradbot.resolver as resolver_mod
-    monkeypatch.setattr(resolver_mod, "GRADBOT_LOCAL_DIR", tmp_path / "local")
 
 
 class TestFetch:
@@ -97,25 +87,6 @@ class TestFetch:
         )
 
     @patch("gradbot.fetcher.clone_or_update")
-    def test_network_failure_with_stale_cache(self, mock_clone, capsys):
-        """Falls back to stale cache on network failure."""
-        resolved = _make_slug()
-
-        # Create a stale local repo with the problem dir
-        local_path = resolved.local_path
-        problem_dir = local_path / "arrays" / "two_sum"
-        problem_dir.mkdir(parents=True, exist_ok=True)
-
-        mock_clone.side_effect = GitError("Could not resolve host")
-
-        result = fetch(resolved, offline=False)
-        assert result == problem_dir
-
-        # Should print a warning
-        captured = capsys.readouterr()
-        assert "Couldn't reach GitHub" in captured.err
-
-    @patch("gradbot.fetcher.clone_or_update")
     def test_offline_no_cache(self, mock_clone):
         """Raises FetchError in offline mode with no cached repo."""
         resolved = _make_slug()
@@ -127,18 +98,16 @@ class TestFetch:
             fetch(resolved, offline=True)
 
     @patch("gradbot.fetcher.clone_or_update")
-    def test_auth_failure(self, mock_clone):
-        """Raises FetchError with auth message on authentication errors."""
-        resolved = _make_slug(mode="submit", token="bad_token",
-                              repo="GradBot/gradbot-problems-private")
+    def test_auth_failure_reads_as_a_missing_repo(self, mock_clone):
+        """GitHub answers 'authentication failed' for a private or missing repo."""
+        resolved = _make_slug()
 
         mock_clone.side_effect = GitError(
             "Git command failed",
             stderr="fatal: Authentication failed for 'https://github.com/...'"
         )
 
-        # local_path doesn't exist (fresh tmp_path)
-        with pytest.raises(FetchError, match="authentication"):
+        with pytest.raises(FetchError, match="Couldn't find the problem repo acme/samples"):
             fetch(resolved, offline=False)
 
 

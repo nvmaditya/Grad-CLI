@@ -1,16 +1,16 @@
 """Tests for gradbot.git — Git CLI wrapper."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gradbot.git import (
     GitError,
-    run_git,
-    ensure_git_installed,
     clone_or_update,
+    ensure_git_installed,
+    has_cached,
+    run_git,
 )
 
 
@@ -79,99 +79,50 @@ class TestEnsureGitInstalled:
 
 
 class TestCloneOrUpdate:
-    """Tests for clone_or_update()."""
+    """clone_or_update() against a real bare repo on disk."""
 
-    @patch("gradbot.git.run_git")
-    def test_fresh_clone(self, mock_run_git, tmp_path):
-        """Creates a new repo when local_path doesn't exist."""
-        local = tmp_path / "new_repo"
-        # local doesn't exist yet
+    @pytest.fixture
+    def remote(self, tmp_path):
+        from tests.samples_repo import SamplesRepo, write_problem
 
-        result = clone_or_update(
-            origin="https://github.com/test/repo.git",
-            local_path=local,
-            branch="main",
-        )
+        repo = SamplesRepo(tmp_path)
+        write_problem(repo.work, "arrays/two_sum")
+        repo.commit()
+        repo.publish()
+        return repo
 
-        assert result == local
-        assert local.exists()
+    def test_fresh_clone(self, remote, tmp_path):
+        local = tmp_path / "clone"
+        assert clone_or_update(str(remote.bare), local, "main") == local
+        assert (local / "arrays" / "two_sum" / "checks.py").is_file()
+        assert has_cached(local, "main")
 
-        # Verify the git commands were called
-        calls = [c.args for c in mock_run_git.call_args_list]
-        # Should have: init, remote add, set-url, fetch, checkout, reset
-        cmd_strs = [" ".join(c) for c in calls]
-        assert any("init" in s for s in cmd_strs)
-        assert any("remote" in s and "add" in s for s in cmd_strs)
-        assert any("fetch" in s for s in cmd_strs)
-        assert any("checkout" in s for s in cmd_strs)
-        assert any("reset" in s for s in cmd_strs)
+    def test_update_existing_removes_stray_files(self, remote, tmp_path):
+        local = tmp_path / "clone"
+        clone_or_update(str(remote.bare), local, "main")
+        (local / "arrays" / "two_sum" / "__pycache__").mkdir()
+        clone_or_update(str(remote.bare), local, "main")
+        assert not (local / "arrays" / "two_sum" / "__pycache__").exists()
 
-    @patch("gradbot.git.run_git")
-    def test_update_existing(self, mock_run_git, tmp_path):
-        """Fetches and checks out when repo already exists."""
-        local = tmp_path / "existing_repo"
-        local.mkdir()
-
-        clone_or_update(
-            origin="https://github.com/test/repo.git",
-            local_path=local,
-            branch="main",
-        )
-
-        calls = [c.args for c in mock_run_git.call_args_list]
-        cmd_strs = [" ".join(c) for c in calls]
-        # Should NOT have init or remote add (repo exists)
-        assert not any("init" in s for s in cmd_strs)
-        # Should have set-url, fetch, checkout, reset
-        assert any("set-url" in s for s in cmd_strs)
-        assert any("fetch" in s for s in cmd_strs)
-
-    @patch("gradbot.git.run_git")
-    def test_offline_existing(self, mock_run_git, tmp_path):
-        """In offline mode with existing repo, skips fetch."""
-        local = tmp_path / "cached_repo"
-        local.mkdir()
-
-        clone_or_update(
-            origin="https://github.com/test/repo.git",
-            local_path=local,
-            branch="main",
-            offline=True,
-        )
-
-        calls = [c.args for c in mock_run_git.call_args_list]
-        cmd_strs = [" ".join(c) for c in calls]
-        # Should NOT have fetch
-        assert not any("fetch" in s for s in cmd_strs)
-        # Should still have checkout and reset
-        assert any("checkout" in s for s in cmd_strs)
-        assert any("reset" in s for s in cmd_strs)
+    def test_offline_existing(self, remote, tmp_path):
+        local = tmp_path / "clone"
+        clone_or_update(str(remote.bare), local, "main")
+        remote.bare.rename(tmp_path / "gone.git")
+        assert clone_or_update(str(remote.bare), local, "main", offline=True) == local
 
     def test_offline_no_existing_raises(self, tmp_path):
-        """In offline mode with no existing repo, raises GitError."""
-        local = tmp_path / "nonexistent"
-
         with pytest.raises(GitError, match="offline"):
-            clone_or_update(
-                origin="https://github.com/test/repo.git",
-                local_path=local,
-                branch="main",
-                offline=True,
-            )
+            clone_or_update("https://github.com/test/repo.git", tmp_path / "none", "main", offline=True)
 
-    @patch("gradbot.git.run_git")
-    def test_custom_branch(self, mock_run_git, tmp_path):
-        """Uses the specified branch for fetch and checkout."""
-        local = tmp_path / "repo"
-        local.mkdir()
+    def test_failed_first_fetch_removes_the_folder(self, tmp_path):
+        local = tmp_path / "clone"
+        with pytest.raises(GitError):
+            clone_or_update(str(tmp_path / "missing.git"), local, "main")
+        assert not local.exists()
 
-        clone_or_update(
-            origin="https://github.com/test/repo.git",
-            local_path=local,
-            branch="v2",
-        )
-
-        calls = [c.args for c in mock_run_git.call_args_list]
-        cmd_strs = [" ".join(c) for c in calls]
-        assert any("v2" in s and "fetch" in s for s in cmd_strs)
-        assert any("origin/v2" in s and "checkout" in s for s in cmd_strs)
+    def test_failed_update_keeps_the_existing_cache(self, remote, tmp_path):
+        local = tmp_path / "clone"
+        clone_or_update(str(remote.bare), local, "main")
+        with pytest.raises(GitError):
+            clone_or_update(str(remote.bare), local, "no-such-branch")
+        assert has_cached(local, "main")

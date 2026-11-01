@@ -5,20 +5,27 @@ A thin wrapper around git commands via subprocess. GradBot uses git directly
 (shallow clones, fetch, checkout) instead of downloading tarballs.
 
 ``clone_or_update()`` does:
-    git init → git remote add origin → git fetch --depth 1 → git checkout → git reset --hard
+    git init → git remote add origin → git fetch --depth 1 <ref>
+    → git update-ref refs/gradbot-cache/<ref> FETCH_HEAD → git checkout --detach
+
+Each requested ref (branch, tag or full commit hash) gets its own cache ref,
+so ``--offline`` and a network failure can only ever reuse the same ref.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+from gradbot.errors import UserError
 
 logger = logging.getLogger("gradbot.git")
 
 
-class GitError(Exception):
+class GitError(UserError):
     """Raised when a git command fails."""
 
     def __init__(self, message: str, stderr: str = ""):
@@ -54,18 +61,21 @@ def run_git(
             cwd=str(cwd) if cwd else None,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
+            env=_git_env(),
         )
     except FileNotFoundError:
         raise GitError(
             "Git is not installed or not in PATH.\n"
             "Ask your teacher to install Git on this computer."
-        )
+        ) from None
     except subprocess.TimeoutExpired:
         raise GitError(
             f"Git command timed out after {timeout} seconds.\n"
             "Check your internet connection and try again."
-        )
+        ) from None
 
     if result.returncode != 0:
         stderr = result.stderr.strip()
@@ -97,7 +107,47 @@ def ensure_git_installed() -> None:
             "  • Windows: https://git-scm.com/download/win\n"
             "  • macOS:   brew install git\n"
             "  • Linux:   sudo apt install git"
-        )
+        ) from None
+
+
+CACHE_REF_PREFIX = "refs/gradbot-cache/"
+
+
+def _git_env() -> dict[str, str]:
+    """Never let git stop and wait for a username or password on the terminal."""
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
+    return env
+
+
+def _cache_ref(ref: str) -> str:
+    # "/" is escaped so "feature" and "feature/x" can both be cached.
+    return CACHE_REF_PREFIX + ref.replace("%", "%25").replace("/", "%2F")
+
+
+def has_cached(local_path: Path, ref: str) -> bool:
+    """True if ``ref`` was fetched into ``local_path`` before."""
+    if not (Path(local_path) / ".git").is_dir():
+        return False
+    try:
+        run_git("rev-parse", "--verify", "--quiet", f"{_cache_ref(ref)}^{{commit}}", cwd=local_path)
+    except GitError:
+        return False
+    return True
+
+
+def checkout_cached(local_path: Path, ref: str) -> Path:
+    """Check out the copy of ``ref`` fetched earlier.
+
+    Raises:
+        GitError: if ``ref`` was never fetched into ``local_path``
+    """
+    if not has_cached(local_path, ref):
+        raise GitError(f"No downloaded copy of '{ref}' in {local_path}")
+    run_git("checkout", "-q", "-f", "--detach", f"{_cache_ref(ref)}^{{commit}}", cwd=local_path)
+    run_git("clean", "-q", "-fdx", cwd=local_path)
+    return Path(local_path)
 
 
 def clone_or_update(
@@ -107,70 +157,47 @@ def clone_or_update(
     offline: bool = False,
 ) -> Path:
     """
-    Create or update a local shallow clone of a git repo.
-
-    Steps:
-    1. If ``local_path`` doesn't exist: ``git init`` + ``git remote add origin``
-    2. If not offline: ``git fetch origin --depth 1 <branch>``
-    3. ``git checkout -f -B <branch> origin/<branch>``
-    4. ``git reset --hard HEAD``
+    Create or update a local shallow clone of a git repo at one ref.
 
     Args:
-        origin: the git remote URL (HTTPS with optional token)
+        origin: the git remote URL or path
         local_path: where to store the local clone
-        branch: the git branch/ref to fetch
-        offline: if True, skip fetch and use whatever is already local
+        branch: the branch, tag, or full commit hash to fetch
+        offline: if True, skip fetch and use the copy of that ref fetched earlier
 
     Returns:
         The local_path
 
     Raises:
-        GitError: if any git operation fails
+        GitError: if any git operation fails. A failed first fetch removes the
+            folder it created, so it is never mistaken for a cache later.
     """
     local_path = Path(local_path)
+    ref = branch
 
-    # Step 1: Initialize repo if it doesn't exist
-    if not local_path.exists():
-        if offline:
+    if offline:
+        if not has_cached(local_path, ref):
             raise GitError(
                 "You're in offline mode, but GradBot hasn't downloaded "
-                "this problem suite before.\n"
+                f"'{ref}' of this problem repo before.\n"
                 "Connect to the internet and try again without --offline."
             )
-        local_path.mkdir(parents=True, exist_ok=True)
-        run_git("init", str(local_path))
-        run_git("remote", "add", "origin", origin, cwd=local_path)
+        return checkout_cached(local_path, ref)
 
-    # Step 2: Fetch latest (unless offline)
-    if not offline:
-        # Update origin URL in case the token changed
-        try:
-            run_git("remote", "set-url", "origin", origin, cwd=local_path)
-        except GitError:
-            # If remote doesn't exist yet (shouldn't happen, but be safe)
-            run_git("remote", "add", "origin", origin, cwd=local_path)
-
-        run_git(
-            "fetch", "origin", "--depth", "1", branch,
-            cwd=local_path,
-            timeout=60,
-        )
-
-    # Step 3: Checkout the branch
-    # Tolerate checkout failure (e.g., when branch doesn't exist locally in offline mode)
+    created = not (local_path / ".git").is_dir()
     try:
-        run_git(
-            "checkout", "-f", "-B", branch, f"origin/{branch}",
-            cwd=local_path,
-        )
-    except GitError as e:
-        if offline:
-            # In offline mode, try to just use whatever HEAD we have
-            logger.warning("Checkout failed in offline mode: %s", e)
+        if created:
+            local_path.mkdir(parents=True, exist_ok=True)
+            run_git("init", "-q", str(local_path))
+            run_git("remote", "add", "origin", origin, cwd=local_path)
         else:
-            raise
+            run_git("remote", "set-url", "origin", origin, cwd=local_path)
 
-    # Step 4: Ensure local copy matches remote exactly
-    run_git("reset", "--hard", "HEAD", cwd=local_path)
+        run_git("fetch", "-q", "--depth", "1", "origin", ref, cwd=local_path, timeout=120)
+        run_git("update-ref", _cache_ref(ref), "FETCH_HEAD", cwd=local_path)
+    except GitError:
+        if created:
+            shutil.rmtree(local_path, ignore_errors=True)
+        raise
 
-    return local_path
+    return checkout_cached(local_path, ref)

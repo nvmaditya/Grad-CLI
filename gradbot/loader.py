@@ -11,12 +11,13 @@ from __future__ import annotations
 import importlib.util
 import sys
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
 
 import yaml
 
+from gradbot.errors import UserError
 
 # ── @gradbot.check decorator ──────────────────────────────────────────
 
@@ -76,7 +77,7 @@ def check(
         )
         _registered_checks.append(cf)
         # Attach metadata to the function for introspection
-        func._gradbot_check = cf
+        func._gradbot_check = cf  # type: ignore[attr-defined]
         return func
 
     return decorator
@@ -85,20 +86,21 @@ def check(
 # ── Suite config loading ──────────────────────────────────────────────
 
 
+LANGUAGES = ("python", "c", "cpp", "java")
+LANGUAGE_NAMES = {"python": "Python", "c": "C", "cpp": "C++", "java": "Java"}
+DEFAULT_TIME_LIMIT = 5.0
+
+
 @dataclass
 class SuiteConfig:
     """Parsed suite.yaml configuration."""
 
     name: str = "Unnamed Problem"
     topic: str = "General"
-    difficulty: str = "beginner"
-    description: str = ""
-    languages: list[str] = field(default_factory=lambda: ["python", "c", "cpp", "java"])
-    time_limit: float = 5.0
-    memory_limit_mb: int = 64
-    total_points: int = 0          # 0 means auto-sum from checks
-    pass_threshold: float = 0.6
-    general_hint: str = ""
+    languages: list[str] = field(default_factory=lambda: list(LANGUAGES))
+    time_limit: float = DEFAULT_TIME_LIMIT  # default timeout for gradbot.run()
+    total_points: int = 0          # 0: not stated; dev warns if it disagrees with the checks
+    general_hint: str = ""         # shown when a run misses marks
     raw: dict = field(default_factory=dict)  # the raw yaml dict
 
 
@@ -113,39 +115,66 @@ def load_suite_config(suite_dir: Path) -> SuiteConfig:
         Parsed SuiteConfig
 
     Raises:
-        FileNotFoundError: if suite.yaml is missing
-        ValueError: if suite.yaml is malformed
+        LoadError: if suite.yaml is missing, is not valid YAML, or has the wrong shape
     """
-    yaml_path = suite_dir / "suite.yaml"
-    if not yaml_path.exists():
-        raise FileNotFoundError(f"Missing suite.yaml in {suite_dir}")
+    yaml_path = Path(suite_dir) / "suite.yaml"
+    if not yaml_path.is_file():
+        raise LoadError(f"Missing suite.yaml in {suite_dir}")
 
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    try:
+        raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, UnicodeDecodeError) as e:
+        raise LoadError(f"suite.yaml in {suite_dir} is not valid YAML:\n  {e}") from e
+    if not isinstance(raw, dict):
+        raise LoadError(f"suite.yaml in {suite_dir} must be a mapping of keys, not a {type(raw).__name__}")
 
-    problem = raw.get("problem", {})
-    scoring = raw.get("scoring", {})
-    hints = raw.get("hints", {})
+    problem = _section(raw, "problem", suite_dir)
+    scoring = _section(raw, "scoring", suite_dir)
+    hints = _section(raw, "hints", suite_dir)
+
+    languages = problem.get("languages", list(LANGUAGES))
+    if not isinstance(languages, list) or not languages:
+        raise LoadError(f"problem.languages in suite.yaml ({suite_dir}) must be a list, such as [python, c]")
+    unknown = [str(lang) for lang in languages if lang not in LANGUAGES]
+    if unknown:
+        raise LoadError(
+            f"problem.languages in suite.yaml ({suite_dir}) lists {', '.join(unknown)}. "
+            f"GradBot supports {', '.join(LANGUAGES)}."
+        )
+
+    time_limit = problem.get("time_limit", DEFAULT_TIME_LIMIT)
+    if isinstance(time_limit, bool) or not isinstance(time_limit, (int, float)) or time_limit <= 0:
+        raise LoadError(f"problem.time_limit in suite.yaml ({suite_dir}) must be a number of seconds above 0")
+
+    total_points = scoring.get("total_points", 0)
+    if isinstance(total_points, bool) or not isinstance(total_points, int) or total_points < 0:
+        raise LoadError(f"scoring.total_points in suite.yaml ({suite_dir}) must be a whole number >= 0")
 
     return SuiteConfig(
-        name=problem.get("name", "Unnamed Problem"),
-        topic=problem.get("topic", "General"),
-        difficulty=problem.get("difficulty", "beginner"),
-        description=problem.get("description", ""),
-        languages=problem.get("languages", ["python", "c", "cpp", "java"]),
-        time_limit=problem.get("time_limit", 5.0),
-        memory_limit_mb=problem.get("memory_limit_mb", 64),
-        total_points=scoring.get("total_points", 0),
-        pass_threshold=scoring.get("pass_threshold", 0.6),
-        general_hint=hints.get("general", ""),
+        name=str(problem.get("name", "Unnamed Problem")),
+        topic=str(problem.get("topic", "General")),
+        languages=list(languages),
+        time_limit=float(time_limit),
+        total_points=total_points,
+        general_hint=str(hints.get("general") or ""),
         raw=raw,
     )
+
+
+def _section(raw: dict, key: str, suite_dir: Path) -> dict:
+    """A top-level suite.yaml section. Missing or empty means defaults."""
+    value = raw.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise LoadError(f"'{key}' in suite.yaml ({suite_dir}) must be a mapping of keys")
+    return value
 
 
 # ── Check loading and DAG construction ────────────────────────────────
 
 
-class LoadError(Exception):
+class LoadError(UserError):
     """Raised when check loading or DAG construction fails."""
     pass
 
@@ -238,15 +267,20 @@ def _import_checks_module(checks_path: Path) -> list[CheckFunction]:
     # Make sure 'gradbot' is importable within the checks module
     # (it should be, since we're running from an installed package)
     old_path = sys.path.copy()
+    old_dont_write = sys.dont_write_bytecode
+    # No __pycache__ next to checks.py: the suite may be a git clone or a
+    # faculty folder that gets published file by file.
+    sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
     except Exception as e:
         raise LoadError(
             f"Error importing {checks_path.name}:\n  {type(e).__name__}: {e}\n"
-            f"Make sure the checks file is valid Python with correct gradbot imports."
-        )
+            "Make sure the checks file is valid Python with correct gradbot imports."
+        ) from e
     finally:
         sys.path = old_path
+        sys.dont_write_bytecode = old_dont_write
 
     # Copy and clear the registry
     checks = list(_registered_checks)
@@ -269,7 +303,16 @@ def _topological_sort(checks: list[CheckFunction]) -> list[CheckFunction]:
     Raises:
         LoadError: on invalid references or cycles
     """
-    by_slug = {c.slug: c for c in checks}
+    by_slug: dict[str, CheckFunction] = {}
+    for c in checks:
+        if c.slug in by_slug:
+            raise LoadError(
+                f"Two checks are both named '{c.slug}'. "
+                "Give each @gradbot.check function its own name."
+            )
+        if not isinstance(c.points, int) or isinstance(c.points, bool) or c.points < 0:
+            raise LoadError(f"Check '{c.slug}' has points={c.points!r}; points must be a whole number >= 0.")
+        by_slug[c.slug] = c
 
     # Validate dependencies
     for c in checks:

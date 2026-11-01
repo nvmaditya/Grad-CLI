@@ -135,3 +135,115 @@ def test_cli_adds_a_roster_row_and_a_test(tmp_path: Path, capsys):
     assert "42,ada,,,,,student" in text.splitlines()
     assert data["assignments"][0]["tests"][0]["name"] == "prints hello"
     assert "Added ada" in capsys.readouterr().out
+
+
+# ── refusals and edge cases ───────────────────────────────────────────
+
+
+def test_blank_classroom_name_is_refused(tmp_path: Path):
+    with pytest.raises(CourseError, match="name is required"):
+        add_classroom(tmp_path, "cs-fall", "   ")
+
+
+def test_unicode_classroom_name_round_trips(tmp_path: Path):
+    folder = add_classroom(tmp_path, "cs-fall", "Informatique — 计算机 🙂")
+    meta = json.loads((folder / "classroom.json").read_text(encoding="utf-8"))
+    assert meta["name"] == "Informatique — 计算机 🙂"
+
+
+@pytest.mark.parametrize("slug", ["a" * 41, "-cs", "cs-", "cs--fall", "cs_fall", "", "../x"])
+def test_classroom_slug_shapes_that_are_refused(tmp_path: Path, slug):
+    with pytest.raises(CourseError):
+        add_classroom(tmp_path, slug, "X")
+
+
+@pytest.mark.parametrize(
+    ("github_id", "username", "role", "match"),
+    [
+        (0, "ada", "student", "positive integer"),
+        (-5, "ada", "student", "positive integer"),
+        (True, "ada", "student", "positive integer"),
+        ("42", "ada", "student", "positive integer"),
+        (42, "ada,eve", "student", "GitHub login"),
+        (42, "-ada", "student", "GitHub login"),
+        (42, "a" * 40, "student", "GitHub login"),
+        (42, "ada", "admin", "role"),
+    ],
+)
+def test_roster_row_refusals(tmp_path: Path, github_id, username, role, match):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    with pytest.raises(CourseError, match=match):
+        add_roster_row(tmp_path, "cs-fall", github_id, username, role)
+
+
+def test_staff_roles_are_recorded(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    for i, role in enumerate(["teacher", "head_ta", "ta"], start=1):
+        add_roster_row(tmp_path, "cs-fall", i, f"user{i}", role)
+    rows = (tmp_path / "cs-fall" / "roster.csv").read_text(encoding="utf-8").splitlines()[1:]
+    assert rows == ["1,user1,,,,,teacher", "2,user2,,,,,head_ta", "3,user3,,,,,ta"]
+
+
+def test_assignment_needs_an_existing_classroom(tmp_path: Path):
+    with pytest.raises(CourseError, match="no classroom"):
+        add_assignment(tmp_path, "cs-fall", "hello", "Hello")
+
+
+def test_assignment_with_a_corrupt_classroom_file(tmp_path: Path):
+    folder = add_classroom(tmp_path, "cs-fall", "CS Fall")
+    (folder / "classroom.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(CourseError, match="no classroom"):
+        add_assignment(tmp_path, "cs-fall", "hello", "Hello")
+
+
+def test_assignment_name_and_duplicate(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    with pytest.raises(CourseError, match="name is required"):
+        add_assignment(tmp_path, "cs-fall", "hello", " ")
+    add_assignment(tmp_path, "cs-fall", "hello", "Hello")
+    with pytest.raises(CourseError, match="already exists"):
+        add_assignment(tmp_path, "cs-fall", "hello", "Again")
+
+
+@pytest.mark.parametrize(
+    ("test", "match"),
+    [
+        ({"name": " ", "type": "io", "points": 1}, "name is required"),
+        ({"name": "t", "type": "shell", "points": 1}, "io, run, or python"),
+        ({"name": "t", "type": "io", "points": -1}, "non-negative"),
+        ({"name": "t", "type": "io", "points": True}, "non-negative"),
+        ({"name": "t", "type": "io", "points": "2"}, "non-negative"),
+    ],
+)
+def test_assignment_test_refusals(tmp_path: Path, test, match):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    add_assignment(tmp_path, "cs-fall", "hello", "Hello")
+    with pytest.raises(CourseError, match=match):
+        add_test(tmp_path, "cs-fall", "hello", test)
+
+
+def test_assignment_test_for_a_missing_assignment(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    with pytest.raises(CourseError, match="no assignment"):
+        add_test(tmp_path, "cs-fall", "nope", {"name": "t", "type": "io", "points": 1})
+
+
+def test_optional_test_fields_are_kept_and_none_is_dropped(tmp_path: Path):
+    add_classroom(tmp_path, "cs-fall", "CS Fall")
+    add_assignment(tmp_path, "cs-fall", "hello", "Hello")
+    add_test(tmp_path, "cs-fall", "hello", {
+        "name": "t", "type": "run", "points": 0, "input": "5\n", "timeout": 2, "expected": None,
+    })
+    data = json.loads((tmp_path / "cs-fall" / "assignments.json").read_text(encoding="utf-8"))
+    assert data["assignments"][0]["tests"][0] == {
+        "name": "t", "type": "run", "points": 0, "input": "5\n", "timeout": 2,
+    }
+
+
+def test_cli_reports_course_errors_without_a_traceback(tmp_path: Path, capsys):
+    from gradbot.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main(["assignment", "add", "nope", "hello", "--name", "Hello", "--root", str(tmp_path)])
+    assert exc.value.code == 1
+    assert "no classroom nope" in capsys.readouterr().out

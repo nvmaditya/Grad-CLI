@@ -2,15 +2,12 @@
 
 import io
 
-import pytest
-
 from gradbot.reporter import (
+    _Colors,
+    _get_encouragement,
+    _progress_bar,
     render,
     render_compile_error,
-    _progress_bar,
-    _get_encouragement,
-    _supports_color,
-    _Colors,
 )
 from gradbot.result import CheckResult, SuiteResult
 

@@ -17,11 +17,9 @@ problem:
       Output: 1 2 3 4 6
   languages: [python, c, cpp, java]
   time_limit: 5
-  memory_limit_mb: 64
 
 scoring:
   total_points: 4
-  pass_threshold: 0.6
 
 hints:
   general: "Inorder traversal visits: left subtree, then root, then right subtree. For a BST, this gives sorted order!"

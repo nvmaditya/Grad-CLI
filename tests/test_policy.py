@@ -8,12 +8,11 @@ from pathlib import Path
 import pytest
 
 from gradbot.policy import (
+    WORKFLOW_TEXT,
     Identity,
     PolicyError,
-    WORKFLOW_TEXT,
     accept_zip,
     add_roster_entry,
-    credential_for,
     device_code_body,
     install_grader_workflow,
     parse_roster,
@@ -22,7 +21,6 @@ from gradbot.policy import (
     safe_source_files,
     slot_ref,
     status_comment,
-    student_can_read_private_repo,
     submit_once,
 )
 from gradbot.result import CheckResult, SuiteResult
@@ -52,7 +50,7 @@ class FakeOps:
         try:
             return self.users[token]
         except KeyError:
-            raise PolicyError("unknown token")
+            raise PolicyError("unknown token") from None
 
     def create_ref(self, ref: str) -> bool:
         with self._lock:
@@ -259,13 +257,9 @@ def test_zip_keeps_source_only():
     assert files == {"solution.py": b"print(1)\n"}
 
 
-def test_student_token_cannot_read_tests():
-    body = device_code_body("course-client")
-    assert body["scope"] == "read:user"
-    assert student_can_read_private_repo(body["scope"]) is False
-    assert credential_for("tests", student_token="stu", app_token="app") == "app"
-    with pytest.raises(PolicyError):
-        credential_for("tests", student_token="stu", app_token="")
+def test_student_login_asks_only_for_read_user():
+    # read:user proves who the student is and cannot read a private repo.
+    assert device_code_body("course-client") == {"client_id": "course-client", "scope": "read:user"}
 
 
 def test_publish_hides_checks_and_workflow_from_samples(tmp_path: Path):
@@ -307,3 +301,10 @@ def test_roster_tracks_id_not_login_case():
     updated = add_roster_entry(text, "ada", 5)
     assert parse_roster(updated) == {5}
     assert updated.count("id: 5") == 1
+
+
+def test_submit_accepts_every_extension_the_compiler_accepts():
+    from gradbot.compiler import _EXTENSION_MAP
+
+    names = {f"solution{ext}": b"x" for ext in _EXTENSION_MAP}
+    assert set(safe_source_files(_zip(names))) == set(names)

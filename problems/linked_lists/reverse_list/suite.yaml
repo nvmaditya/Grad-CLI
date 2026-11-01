@@ -17,11 +17,9 @@ problem:
       Output: 5 4 3 2 1
   languages: [python, c, cpp, java]
   time_limit: 5
-  memory_limit_mb: 64
 
 scoring:
   total_points: 4
-  pass_threshold: 0.6
 
 hints:
   general: "Try using three pointers: prev, current, and next. Walk through the list, reversing each link as you go."

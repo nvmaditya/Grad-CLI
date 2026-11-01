@@ -1,49 +1,27 @@
-# Grade CLI
+# GradBot
 
-**Free course grading on a free GitHub organization.**
+**An autograder for programming courses that runs on a free GitHub organization, and keeps hidden tests off students' machines.**
 
-The command is `grade`. `GradBot` starts the same program. Practice mode shows the tests. Submit mode shows pass or fail plus a hint, and keeps the hidden cases hidden. Compiler errors name the line. Raw compiler output stays behind `--verbose`.
+[![CI](https://github.com/nvmaditya/gradbot/actions/workflows/ci.yml/badge.svg)](https://github.com/nvmaditya/gradbot/actions/workflows/ci.yml)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+[![Python 3.10–3.14](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776AB.svg)](pyproject.toml)
+[![Lint: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://docs.astral.sh/ruff/)
+[![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](https://mypy-lang.org/)
 
-Course files live in a `gradecli/` directory (`grade course add`, `grade assignment add`). That layout does not use GitHub Team, GitHub Enterprise, or GitHub Pages. Grading is meant to run as a reusable workflow inside the organization, on the free plan's included Actions minutes, with a $0 spending cap.
+<!--
+TODO(demo): replace this comment with docs/demo.gif (about 15 s, 100x30 terminal, dark theme).
+Capture, from a folder holding the Two Sum sample solution:
+  1. `grade run arrays/two_sum`          -> four green checks, "Score: 4 / 4", "Accepted."
+  2. edit the print to `print(i, seen[complement])` (indexes swapped)
+  3. `grade run arrays/two_sum`          -> red check with its hint, skipped dependents, "Score: 0 / 4"
+  4. `grade run arrays/two_sum --verbose` -> the expected vs actual line under the failure
+Then: ![GradBot grading a Two Sum solution](docs/demo.gif)
+-->
 
----
+```text
+$ grade run arrays/two_sum
+Practice runs on this computer. The submit machine may differ.
 
-## Quick Start
-
-### Install
-
-```bash
-pip install -e .
-```
-
-### Write Your Solution
-
-Create a file (e.g., `solution.py`) that solves the problem:
-
-```python
-# solution.py — Two Sum
-n = int(input())
-nums = list(map(int, input().split()))
-target = int(input())
-
-seen = {}
-for i, num in enumerate(nums):
-    complement = target - num
-    if complement in seen:
-        print(seen[complement], i)
-        break
-    seen[num] = i
-```
-
-### Run GradBot
-
-```bash
-GradBot practice/arrays/two_sum
-```
-
-You'll see output like:
-
-```
 Grade — Arrays & Strings: Two Sum
 ─────────────────────────────────────────────
 
@@ -58,142 +36,192 @@ Grade — Arrays & Strings: Two Sum
   Accepted. All tests passed.
 ```
 
----
+## Why this exists
 
-## Slug Format
+Autograders tend to force a choice. Ship the tests to students and they can
+read the answers; keep them on a server and someone has to pay for, run and
+secure that server. Classroom 50, an open-source GitHub Classroom
+alternative, needs a GitHub Team or Enterprise organization and publishes through GitHub Pages
+([research notes](docs/research/classroom50-architecture.md)).
 
+GradBot splits each problem in two. Public sample checks go to students, who
+run them locally as often as they like. Hidden checks stay in a private repo
+and run in a no-network container, on the free GitHub Actions minutes of the
+course's own organization. Students get one graded submit per problem,
+enforced by a git ref, and see pass/fail and hints, never the expected
+output.
+
+**Status.** Practice, faculty `dev` and `publish`, all four languages, and
+the submit client and rules are tested end to end, against a fake GitHub and
+local git repos, and practice also against the real GitHub. Two pieces have
+not run live yet: the grader workflow has never been dispatched on GitHub,
+and the course App that receives submits is yours to deploy. Details are in
+[VERIFICATION_REPORT.md](VERIFICATION_REPORT.md).
+
+## Features
+
+- **Write checks in plain Python.** `@gradbot.check`, `gradbot.run()`,
+  `expect_output()`, with dependencies between checks and per-check hints.
+- **Grades Python, C, C++ and Java.** Compile errors are reduced to "error on
+  line N", with the raw compiler output behind `--verbose`.
+- **Practice anywhere.** `grade run topic/problem` fetches only the public
+  checks (any branch, tag or commit), caches them, and works `--offline`.
+- **Hidden checks stay hidden.** Student runs refuse `checks_hidden.py`.
+  `grade publish` splits a problem into a private tests tree and a public
+  samples tree. Student-facing JSON drops expected output.
+- **Faculty loop.** `grade dev` runs public then hidden checks and says which
+  set failed. `--output` and `--student-output` write both views.
+- **Safe execution.** Every check runs in a fresh copy. The program never sees
+  tokens from the environment. In the grader it runs in Docker with no
+  network, resource limits and no root.
+- **One graded submit.** GitHub device login (`read:user` only), source-only
+  zips sent over HTTPS, a roster keyed by GitHub's numeric id, and faculty
+  `reset` for a second chance. You deploy the small course App that receives
+  submits; its rules ship here as `gradbot.policy.accept_zip`. See the
+  [faculty guide](docs/faculty-guide.md).
+- **Clear failures.** Missing config, a broken `suite.yaml`, a missing repo or
+  ref, or a dead network each get a message that says what to do. Never a
+  traceback.
+
+## Quickstart
+
+macOS or Linux, with Git and Python 3.10 or newer (check `python3 --version`;
+the `python3` that ships with macOS is 3.9, so use one from python.org or
+Homebrew):
+
+```bash
+git clone https://github.com/nvmaditya/gradbot && cd gradbot
+python3 -m venv .venv && source .venv/bin/activate
+pip install .
+grade dev problems/arrays/two_sum --solution problems/arrays/two_sum/sample_solution
+cd problems/arrays/two_sum/sample_solution && grade run arrays/two_sum
 ```
-{mode}/{topic}/{problem}[@ref]
+
+The fourth line grades the bundled sample solution against the bundled
+checks, offline. The fifth fetches the public demo course from GitHub and
+grades the same solution as a student would.
+
+Next: the [student guide](docs/student-guide.md),
+the [faculty guide](docs/faculty-guide.md),
+and [writing a problem](docs/problem-authoring.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph laptop["Student's computer"]
+        run["grade run"] --> fetch["fetch public checks<br/>(git, one ref, cached)"]
+        fetch --> grade["compile and run each check<br/>in a fresh copy"]
+        grade --> report["✓ ✗ ○ + hints + score"]
+        submit["grade submit"]
+    end
+    subgraph github["Free GitHub organization"]
+        samples[("samples repo<br/>public")]
+        tests[("tests repo<br/>private: checks_hidden.py")]
+        wf["grade.yml<br/>Docker, --network none"]
+    end
+    app["course App<br/>(you deploy; uses gradbot.policy)"]
+    fetch --> samples
+    submit -->|"zip + login token"| app
+    app -->|"slot ref, commit, dispatch"| tests
+    tests --> wf
+    faculty["faculty: grade dev / publish"] --> samples
+    faculty --> tests
 ```
 
-| Part | Description | Example |
-|------|-------------|---------|
-| `mode` | `practice` (public tests) or `submit` (hidden tests) | `practice` |
-| `topic` | Topic folder name | `arrays`, `graphs`, `dp` |
-| `problem` | Problem folder name | `two_sum`, `merge_sort` |
-| `@ref` | Optional git ref (branch/tag/commit) | `@v2`, `@main` |
+The module-by-module walk-through, the error model and the trust
+boundaries are in [docs/architecture.md](docs/architecture.md).
 
-**Practice** (`gradbot run` or `GradBot practice/...`) runs the public sample checks on this computer. It can show expected output. The submit machine may differ.
+## Configuration
 
-**Submit** (`gradbot submit`) sends the solution to the course App. Hidden checks never download to the student machine. The student sees pass or fail, points, and hints.
+GradBot reads environment variables only. [`.env.example`](.env.example)
+lists each one with whether it is required.
 
----
+| Variable | Needed by | Default |
+|---|---|---|
+| `GRADBOT_PUBLIC_REPO` | `grade run` | `nvmaditya/gradbot-course-samples` (the demo course). `owner/repo`, a git URL, or a path. |
+| `GRADBOT_LOCAL_DIR` | `grade run` | `~/.gradbot/local` |
+| `GRADBOT_CONFIG_DIR` | `grade login`, `grade submit` | `~/.gradbot` |
+| `GRADBOT_CLIENT_ID` | `grade login` (required) | — |
+| `GRADBOT_SUBMIT_URL` | `grade submit` (required, https) | — |
+| `GRADBOT_APP_TOKEN` | `grade roster add`, `grade reset` (required) | — |
+| `GRADBOT_SUBMISSIONS_REPO` | `grade reset` (required) | — |
+| `GRADBOT_GITHUB_URL`, `GRADBOT_GITHUB_API_URL` | login, roster, reset | github.com (set both for GitHub Enterprise Server) |
+| `NO_COLOR` | everything | — |
+
+A missing required variable stops the command with its name and what it is
+for. A malformed one (for example `GRADBOT_PUBLIC_REPO=not a repo`) is refused
+the same way.
 
 ## Commands
 
-```bash
-gradbot login                         # GitHub device code, scope read:user
-gradbot run arrays/two_sum            # public checks, as many times as you want
-gradbot submit arrays/two_sum         # one graded attempt, hidden checks stay on the grader
-gradbot dev ./problems/arrays/two_sum # faculty: public checks, then hidden checks
-gradbot publish ./problems/arrays/two_sum --tests ../course-tests --samples ../course-samples --slug arrays/two_sum
-gradbot results faculty.json          # print a result with cause and log removed
-gradbot reset <login> <slug>          # faculty second chance
-gradbot roster add <login> --roster roster.yml
-```
+| Command | |
+|---|---|
+| `grade run topic/problem[@ref]` | Practise against the public checks. |
+| `grade dev PROBLEM_DIR --solution DIR` | Faculty: public checks, then hidden checks. |
+| `grade publish PROBLEM_DIR --tests T --samples S --slug topic/problem` | Faculty: split into the two repos and write `grade.yml`. |
+| `grade login` / `grade submit topic/problem` | The one graded submit. |
+| `grade roster add LOGIN --roster roster.yml` | Faculty: enrol by GitHub's numeric id. |
+| `grade reset LOGIN topic/problem` | Faculty: one more submit. |
+| `grade results FILE` | Print a result without hidden detail. |
+| `grade course …`, `grade assignment …` | Classroom files for the course-repo design (preview). |
 
-`GradBot practice/arrays/two_sum` and `GradBot --dev ./problems/arrays/two_sum` still work. `GradBot submit/...` does not clone hidden tests.
+`grade COMMAND --help` lists each command's options. `GradBot` and
+`python -m gradbot` start the same program.
 
-Share [STUDENT.md](STUDENT.md) with students and [FACULTY.md](FACULTY.md) with faculty. The private course used to try both flows is [nvmaditya/gradbot-e2e](https://github.com/nvmaditya/gradbot-e2e). Practice problems for that course are in the public repo [nvmaditya/gradbot-course-samples](https://github.com/nvmaditya/gradbot-course-samples).
-
-One submit per student per problem. The lock is a git ref `refs/gradbot/slots/<slug>/<github-user-id>`. The id comes from GitHub's response to the login token. A login typed in the request is ignored. An account that is not on `roster.yml` is refused. Faculty `reset` is the only second chance.
-
----
-
-## CLI Options
-
-```
-GradBot <slug> [options]
-
-positional:
-  slug                  e.g. practice/arrays/two_sum
-
-options:
-  --verbose, -v         Show full diff and log on failures
-  --no-color            Disable colored output
-  --output FILE         Save JSON results to FILE
-  --timeout N           Per-check timeout in seconds (default: 5)
-  --solution DIR        Path to solution directory (default: current dir)
-  --offline             Use cached test suite, skip network
-  --dev                 Dev mode: treat slug as local path to problem suite
-  --version             Print GradBot version
-```
-
----
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GRADBOT_PUBLIC_REPO` | Public samples repo for `gradbot run` | `GradBot/gradbot-problems-public` |
-| `GRADBOT_CLIENT_ID` | GitHub OAuth app id for `gradbot login` | _(none)_ |
-| `GRADBOT_SUBMIT_URL` | Course App that receives a submission zip | _(none)_ |
-| `GRADBOT_APP_TOKEN` | Faculty/App token for roster, reset, and the tests repo | _(none)_ |
-| `GRADBOT_SUBMISSIONS_REPO` | `owner/repo` whose slot refs `gradbot reset` deletes | _(none)_ |
-| `GRADBOT_CONFIG_DIR` | Where the device token is stored | `~/.gradbot` |
-| `GRADBOT_LOCAL_DIR` | Clone of the public samples repo | `~/.gradbot/local` |
-| `NO_COLOR` | Disable colored output (any value) | _(none)_ |
-
-Students do not get a personal access token. `GRADBOT_TOKEN` is not read.
-
-### Three repos
-
-| Repo | Who can read | Contents |
-|---|---|---|
-| `org/<course>-tests` | Faculty and the GitHub App | `checks.py`, `checks_hidden.py`, `suite.yaml`, `roster.yml`, the grader workflow |
-| `org/<course>-samples` | Public | Statement, `suite.yaml`, `checks.py` only |
-| `org/<course>-submissions` | Faculty and the App | Solution files under `<slug>/<github-user-id>/<timestamp>/` |
-
----
-
-## Supported Languages
-
-| Language | Extension | Compiler | Run Command |
-|----------|-----------|----------|-------------|
-| Python | `.py` | Syntax check (`py_compile`) | `python solution.py` |
-| C | `.c` | `gcc` | `./solution` |
-| C++ | `.cpp`, `.cc` | `g++ -std=c++17` | `./solution` |
-| Java | `.java` | `javac` | `java ClassName` |
-
----
-
-## Setting Up Your Own Problem Repository
-
-1. Create a GitHub repository (public for practice, private for submit)
-2. Organize problems by topic:
-   ```
-   arrays/
-     two_sum/
-       suite.yaml
-       checks.py
-   trees/
-     inorder_traversal/
-       suite.yaml
-       checks.py
-   ```
-3. Set the environment variables to point to your repo:
-   ```bash
-   export GRADBOT_PUBLIC_REPO="your-org/your-problems"
-   ```
-4. See [PROBLEM_AUTHORING.md](PROBLEM_AUTHORING.md) for the complete guide to writing problems.
-
----
-
-## Development
+## Testing
 
 ```bash
-# Install with dev dependencies
 pip install -e ".[dev]"
-
-# Run tests
-pytest tests/ -v
-
-# Test with a local problem suite
-GradBot --dev ./problems/arrays/two_sum --solution ./problems/arrays/two_sum/sample_solution
+pytest                                   # offline suite: unit, integration, end to end
+pytest --cov                             # with line and branch coverage
+ruff check gradbot tests && mypy         # lint and types
+pytest -m docker                         # the Docker sandbox (needs a Docker daemon)
+GRADBOT_LIVE=1 pytest -m live            # smoke tests against the real GitHub
 ```
 
----
+The default run needs no network and no secrets. GitHub, the course App and
+the samples repo are replaced by a local HTTP server and bare git repos on
+disk, so the tests are deterministic and free. End-to-end tests drive the
+installed `grade` command as a subprocess through every main flow, including
+login, submit, a refused second submit, reset, and submit again. Language
+tests compile and run real C, C++ and Java, and skip with a reason if a
+toolchain is missing. CI requires them.
 
-## License
+The CI workflow runs lint, types and the suite on Python 3.10–3.14 (Ubuntu)
+and 3.12 (macOS), the Docker tests against a real daemon, and a clean wheel
+install.
+What has and has not been verified, with the test for each feature, is in
+[VERIFICATION_REPORT.md](VERIFICATION_REPORT.md).
 
-GPL-3.0-only. See [LICENSE](LICENSE).
+## Roadmap
+
+Planned, not built:
+
+- **Reference course App.** A small deployable service around
+  `gradbot.policy.accept_zip` with a GitHub client, so graded submits work
+  without writing your own. The in-memory App in `tests/test_e2e.py` is the
+  starting point.
+- **Course repo on a free organization** ([spec](docs/design/course-repo-spec.md)):
+  staging the course tree, creating the private repo with a $0 Actions cap,
+  team invites by GitHub id, starter repos, tag-based submits, a score book,
+  and a static classroom page. Classroom files and the workflow text, its
+  first two steps, are built.
+- **Memory limits** in local runs (`problem.memory_limit_mb`). The Docker
+  sandbox already caps memory at 512 MB.
+- **Windows in CI.** The code has Windows branches, but no Windows run has
+  been verified.
+- **Output size cap** for programs that print without end before their
+  timeout.
+- **Faculty authoring prompt** ([design](docs/design/faculty-authoring-prompt.md)):
+  a prompt that turns a question into problem files in any chat.
+
+## Credits
+
+Built by Aditya Khandelwal. The course-repo design learned from
+[Classroom 50](https://github.com/foundation50/classroom50)'s architecture
+([research notes](docs/research/classroom50-architecture.md)); no Classroom 50
+code is used. YAML parsing by [PyYAML](https://pyyaml.org/).
+
+GradBot is free software under the [GNU GPL v3.0 only](LICENSE). See
+[CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md).
