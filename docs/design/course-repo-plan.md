@@ -1,7 +1,5 @@
 # Grade CLI multi-session plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan session-by-session. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Build Grade CLI into a free course tool on a free GitHub organization: classrooms, roster, assignments, one graded submit, and scores, with no Team plan and no GitHub Pages.
 
 **Architecture:** The course is a private GitHub repo named `gradecli`. Classrooms are directories of JSON and CSV. Students get their own private repos. Grading runs in the course repo, checks out the student's tagged commit with a faculty token, and runs the existing `python -m gradbot dev` engine. Hidden checks never enter the student repo. The student repo has no workflow and no secret.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -81,7 +82,13 @@ def test_a_timed_out_container_is_removed(tmp_path):
         "    assert gradbot.run(timeout=2).timed_out\n"
     )
     assert _grade(tmp_path, "solution.py", "while True:\n    pass\n", checks) == 0
-    left = subprocess.run(
-        ["docker", "ps", "-aq", "--filter", "name=gradbot-"], capture_output=True, text=True,
-    ).stdout.split()
+    # --rm removes the killed container asynchronously; give it a few seconds.
+    deadline = time.monotonic() + 10
+    while True:
+        left = subprocess.run(
+            ["docker", "ps", "-aq", "--filter", "name=gradbot-"], capture_output=True, text=True,
+        ).stdout.split()
+        if left == [] or time.monotonic() > deadline:
+            break
+        time.sleep(0.5)
     assert left == []

@@ -114,7 +114,7 @@ def test_run_replaces_invalid_utf8_instead_of_raising(program):
 
 def test_run_times_out_and_keeps_partial_output(program):
     program("import time\nprint('partial', flush=True)\ntime.sleep(30)\n")
-    result = run(timeout=0.5)
+    result = run(timeout=2)  # room for interpreter start-up on a cold CI runner
     assert result.timed_out is True
     assert result.exit_code == -1
     assert "partial" in result.stdout
