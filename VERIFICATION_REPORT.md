@@ -15,17 +15,17 @@ covers each feature, the bugs found and fixed, and what is still unverified.
 | Compilers | Apple clang 21 as `gcc`/`g++`; Temurin JDK 21.0.13, unpacked into a scratch folder for the Java runs |
 | Not available here | Docker, Windows, Python 3.10–3.13 interpreters, actionlint |
 | Fresh clone | `git clone -b harden` into an empty folder with `env -i` and `HOME` set to an empty folder, then the README quickstart typed exactly as written: both commands graded 4/4 and the student folder was left with only `solution.py` |
-| Suite in the fresh clone | Activated venv: **469 passed, 16 skipped**. Minimal `PATH`, venv not activated, JDK on PATH, `GRADBOT_REQUIRE_TOOLCHAINS=gcc,g++,jdk`: **472 passed, 2 skipped** (11 Docker/live deselected) |
+| Suite in the fresh clone (final `harden` head) | Activated venv: **487 passed, 16 skipped**. Minimal `PATH`, venv not activated, JDK on PATH, `GRADBOT_REQUIRE_TOOLCHAINS=gcc,g++,jdk`, the CI test command: **490 passed, 2 skipped** (11 Docker/live deselected). Working tree clean afterwards. |
 | Lint and types | `ruff check gradbot tests` clean; `mypy` (`check_untyped_defs`, `python_version = 3.10`) clean on 22 files |
-| Coverage | **97%** line and branch over `gradbot/` (1866 statements, 536 branches), including the `grade` subprocesses the end-to-end tests start |
+| Coverage | **96%** line and branch over `gradbot/` (1866 statements, 536 branches) with the CI test command, including the `grade` subprocesses the end-to-end tests start. Uncovered: Windows-only branches, returns after `sys.exit`, a few defensive fallbacks |
 | Live | `GRADBOT_LIVE=1 pytest -m live`: practice against the real public demo course **passed**; device-login start and user lookup **skipped** (no `GRADBOT_CLIENT_ID` / `GRADBOT_APP_TOKEN`) |
 | CI | `.github/workflows/ci.yml` written; its lint, test and package steps were run locally and pass. **It has not run on GitHub**, because the branch is not pushed |
 
-### Test inventory: 485 tests
+### Test inventory: 503 tests
 
 | Group | Tests | Where they ran |
 |---|---|---|
-| Offline suite (`-m "not docker and not live"`) | 474 | Here, every run. 3 Java tests skip without a JDK and ran with one; 2 actionlint tests skip (not installed). |
+| Offline suite (`-m "not docker and not live"`) | 492 | Here, every run. 3 Java tests skip without a JDK and ran with one; 2 actionlint tests skip (not installed). |
 | Docker (`-m docker`) | 7 | **Not run**: no Docker here. CI's `docker` job runs them. |
 | Live (`-m live`) | 4 | 2 ran and passed (practice, `.env` not tracked); 2 skipped for missing keys. |
 
@@ -33,7 +33,8 @@ Largest files: `test_remote_commands.py` 44, `test_course.py` 40,
 `test_edges.py` 35, `test_resolver.py` 29, `test_api.py` 27,
 `test_practice_fetch.py` 26, `test_compiler_errors.py` 22, `test_loader.py` 21,
 `test_policy.py` 21, `test_compiler.py` 21, `test_suite_settings.py` 19,
-`test_e2e.py` 18, `test_workflows.py` 18, `test_reporter.py` 18.
+`test_e2e.py` 18, `test_workflows.py` 18, `test_reporter.py` 18,
+`test_docs.py` 18 (every relative link resolves; every test cited here exists).
 
 ## Feature table
 
