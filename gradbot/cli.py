@@ -520,20 +520,30 @@ def _cmd_login(argv: list[str]) -> None:
 
 
 def _cmd_publish(argv: list[str]) -> None:
-    from gradbot.policy import install_grader_workflow, publish_suite
+    from gradbot.fetcher import fetch_local
+    from gradbot.policy import hidden_files_in, install_grader_workflow, publish_suite
+    from gradbot.remote import problem_slug
 
-    parser = argparse.ArgumentParser(prog="gradbot publish")
+    parser = argparse.ArgumentParser(prog="grade publish")
     parser.add_argument("suite")
     parser.add_argument("--tests", required=True, help="Checkout of the private tests repo")
     parser.add_argument("--samples", required=True, help="Checkout of the public samples repo")
     parser.add_argument("--slug", required=True, help="Path inside the repos, such as arrays/two_sum")
     args = parser.parse_args(argv)
-    suite = Path(args.suite).resolve()
+    slug = problem_slug(args.slug)
+    suite = fetch_local(Path(args.suite))
     tests_root = Path(args.tests).resolve()
     samples_root = Path(args.samples).resolve()
-    publish_suite(suite, tests_root / args.slug, samples_root / args.slug)
+    leaked = hidden_files_in(samples_root)
+    if leaked:
+        raise UserError(
+            "The public samples tree already contains hidden checks: "
+            + ", ".join(leaked)
+            + ". Remove them (and from that repo's history if it was pushed) before publishing."
+        )
+    publish_suite(suite, tests_root / slug, samples_root / slug)
     install_grader_workflow(tests_root)
-    print(f"Published {args.slug}. checks_hidden.py stayed in the tests repo.")
+    print(f"Published {slug}. checks_hidden.py stayed in the tests repo.")
     sys.exit(0)
 
 

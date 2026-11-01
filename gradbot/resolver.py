@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from gradbot import config
+from gradbot.errors import UserError
 from gradbot.result import Mode
 
 # Slug pattern: mode/topic/problem[@ref]. A ref may not start with "-" (it
@@ -27,7 +28,7 @@ _SLUG_PATTERN = re.compile(
 )
 
 
-class SlugError(Exception):
+class SlugError(UserError):
     """Raised when a slug is malformed or unresolvable."""
     pass
 

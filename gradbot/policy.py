@@ -282,18 +282,37 @@ def reset_slot(ops, slug: str, user_id: int) -> None:
 
 
 def publish_suite(suite_dir: Path, tests_dir: Path, samples_dir: Path) -> None:
-    """Copy a problem. Hidden checks stay in the tests tree only."""
+    """Copy a problem. Hidden checks stay in the tests tree only.
+
+    The tests tree gets every file and folder (such as ``expected/``) except
+    ``sample_solution``. The samples tree gets suite.yaml, statement.md and
+    checks.py, nothing else.
+    """
     suite_dir = Path(suite_dir)
     tests_dir = Path(tests_dir)
     samples_dir = Path(samples_dir)
     tests_dir.mkdir(parents=True, exist_ok=True)
     samples_dir.mkdir(parents=True, exist_ok=True)
     for path in suite_dir.iterdir():
-        if not path.is_file() or path.name == "sample_solution":
+        if path.name == "sample_solution" or path.name.startswith(".") or path.name == "__pycache__":
             continue
-        shutil.copy2(path, tests_dir / path.name)
+        if path.is_dir():
+            shutil.copytree(
+                path, tests_dir / path.name, dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns(".*", "__pycache__"),
+            )
+        else:
+            shutil.copy2(path, tests_dir / path.name)
     for path in public_bundle_files(suite_dir):
         shutil.copy2(path, samples_dir / path.name)
+
+
+def hidden_files_in(samples_root: Path) -> list[str]:
+    """Any checks_hidden.py under a public samples tree, as paths relative to it."""
+    root = Path(samples_root)
+    if not root.is_dir():
+        return []
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("checks_hidden.py"))
 
 
 def install_grader_workflow(tests_repo: Path) -> Path:

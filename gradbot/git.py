@@ -20,10 +20,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from gradbot.errors import UserError
+
 logger = logging.getLogger("gradbot.git")
 
 
-class GitError(Exception):
+class GitError(UserError):
     """Raised when a git command fails."""
 
     def __init__(self, message: str, stderr: str = ""):

@@ -14,6 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
+from gradbot.errors import UserError
 from gradbot.git import GitError, checkout_cached, clone_or_update, has_cached
 from gradbot.resolver import ResolvedSlug
 
@@ -41,7 +42,7 @@ _MISSING_REPO_SIGNS = (
 )
 
 
-class FetchError(Exception):
+class FetchError(UserError):
     """Raised when fetching a test suite fails irrecoverably."""
     pass
 

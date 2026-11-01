@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from gradbot.errors import UserError
+
 # ── @gradbot.check decorator ──────────────────────────────────────────
 
 # Global registry populated during module import
@@ -172,7 +174,7 @@ def _section(raw: dict, key: str, suite_dir: Path) -> dict:
 # ── Check loading and DAG construction ────────────────────────────────
 
 
-class LoadError(Exception):
+class LoadError(UserError):
     """Raised when check loading or DAG construction fails."""
     pass
 
