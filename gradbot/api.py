@@ -85,6 +85,7 @@ def _get_context():
         "run_command": getattr(_context, "run_command", None),
         "work_dir": getattr(_context, "work_dir", None),
         "sandbox": getattr(_context, "sandbox", None),
+        "default_timeout": getattr(_context, "default_timeout", None),
     }
 
 
@@ -93,12 +94,14 @@ def set_context(
     run_command: list[str],
     work_dir: Path,
     sandbox: str | None = None,
+    default_timeout: float | None = None,
 ) -> None:
     """Set the context for the current check. Called by runner.py."""
     _context.solution_dir = solution_dir
     _context.run_command = run_command
     _context.work_dir = work_dir
     _context.sandbox = sandbox
+    _context.default_timeout = default_timeout
 
 
 def clear_context() -> None:
@@ -107,18 +110,24 @@ def clear_context() -> None:
     _context.run_command = None
     _context.work_dir = None
     _context.sandbox = None
+    _context.default_timeout = None
 
 
 # ── Public API functions ──────────────────────────────────────────────
 
 
-def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) -> RunResult:
+DEFAULT_TIMEOUT = 5.0
+
+
+def run(input: str = "", timeout: float | None = None, args: list[str] | None = None) -> RunResult:
     """
     Run the student's program with the given stdin input.
 
     Args:
         input: String to feed to stdin (newlines separate lines)
-        timeout: Maximum seconds to wait before killing the process
+        timeout: Maximum seconds to wait before killing the process. When
+            omitted: ``--timeout`` if given, else suite.yaml ``time_limit``,
+            else 5 seconds.
         args: Additional command-line arguments to pass to the program
 
     Returns:
@@ -136,6 +145,9 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
             "No program to run — check that your code compiled successfully.",
             hint="Make sure your solution file is in the right place!",
         )
+
+    if timeout is None:
+        timeout = ctx["default_timeout"] or DEFAULT_TIMEOUT
 
     full_cmd = list(cmd)
     if args:

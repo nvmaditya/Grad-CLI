@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 
 from gradbot import api
-from gradbot.compiler import CompileResult, get_run_command
+from gradbot.compiler import CompileResult, get_run_command, restrict_languages
 from gradbot.loader import CheckFunction, SuiteConfig
 from gradbot.result import CheckResult, Mode, SuiteResult
 from gradbot.workspace import copy_solution
@@ -26,6 +26,7 @@ def run_suite(
     compile_result: CompileResult,
     mode: Mode,
     sandbox: str | None = None,
+    default_timeout: float | None = None,
 ) -> SuiteResult:
     """
     Execute all checks in dependency order and return a SuiteResult.
@@ -50,6 +51,9 @@ def run_suite(
     results: list[CheckResult] = []
     # Track status by slug for dependency resolution
     status_map: dict[str, str] = {}
+    compile_result = restrict_languages(compile_result, config.languages)
+    timeout = default_timeout or config.time_limit
+    general_hint = config.general_hint or None
 
     # ── If compilation failed, skip everything ─────────────────────
     if not compile_result.success:
@@ -69,6 +73,7 @@ def run_suite(
             topic=config.topic,
             mode=mode,
             checks=results,
+            general_hint=general_hint,
         )
 
     # ── Build the run command ──────────────────────────────────────
@@ -94,7 +99,7 @@ def run_suite(
 
         # Run the check in isolation
         result = _run_single_check(
-            check, solution_dir, run_command, compile_result, sandbox=sandbox,
+            check, solution_dir, run_command, compile_result, sandbox=sandbox, timeout=timeout,
         )
         results.append(result)
         status_map[check.slug] = result.status
@@ -104,6 +109,7 @@ def run_suite(
         topic=config.topic,
         mode=mode,
         checks=results,
+        general_hint=general_hint,
     )
 
 
@@ -113,6 +119,7 @@ def _run_single_check(
     run_command: list[str],
     compile_result: CompileResult,
     sandbox: str | None = None,
+    timeout: float | None = None,
 ) -> CheckResult:
     """
     Run a single check function in an isolated temp directory.
@@ -142,6 +149,7 @@ def _run_single_check(
                 run_command=adjusted_cmd,
                 work_dir=work_dir,
                 sandbox=sandbox,
+                default_timeout=timeout,
             )
 
             try:

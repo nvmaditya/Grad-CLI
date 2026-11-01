@@ -88,6 +88,16 @@ def _make_output_unbreakable() -> None:
                 pass
 
 
+def _positive_seconds(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' is not a number of seconds") from None
+    if not value > 0 or value != value or value == float("inf"):
+        raise argparse.ArgumentTypeError("timeout must be a number of seconds above 0")
+    return value
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -129,10 +139,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--timeout",
-        type=float,
-        default=5.0,
+        type=_positive_seconds,
+        default=None,
         metavar="N",
-        help="Per-check timeout in seconds (default: 5)",
+        help="Seconds each run of the program may take (default: suite.yaml time_limit, else 5)",
     )
 
     parser.add_argument(
@@ -218,6 +228,7 @@ def _run(args: argparse.Namespace) -> None:
             faculty_output=args.output,
             student_output=args.student_output,
             sandbox=args.sandbox,
+            timeout=args.timeout,
         )
         return
 
@@ -240,6 +251,7 @@ def _run(args: argparse.Namespace) -> None:
         no_color=args.no_color,
         faculty_output=args.output,
         student_output=args.student_output,
+        timeout=args.timeout,
     )
 
 
@@ -273,6 +285,7 @@ def grade_student(
     no_color: bool = False,
     faculty_output: str | None = None,
     student_output: str | None = None,
+    timeout: float | None = None,
 ) -> None:
     """Public checks only. Refuse a hidden file in the suite or the solution."""
     from gradbot.loader import LoadError, guard_student_suite
@@ -287,6 +300,7 @@ def grade_student(
     print("Practice runs on this computer. The submit machine may differ.")
     result = _grade_one(
         suite_dir, solution_dir, "checks.py", "practice", verbose, no_color, None, None,
+        timeout=timeout,
     )
     _write_views(result, None, faculty_output, student_output)
     sys.exit(0 if result.score >= 1.0 else 1)
@@ -300,11 +314,13 @@ def grade_dev(
     faculty_output: str | None = None,
     student_output: str | None = None,
     sandbox: str | None = None,
+    timeout: float | None = None,
 ) -> None:
     """Run public checks, then hidden checks, and say which set failed."""
     public = _grade_one(
         suite_dir, solution_dir, "checks.py", "practice",
         verbose, no_color, sandbox, "Public checks",
+        timeout=timeout, faculty=True,
     )
     hidden = None
     hidden_path = Path(suite_dir) / "checks_hidden.py"
@@ -312,6 +328,7 @@ def grade_dev(
         hidden = _grade_one(
             suite_dir, solution_dir, "checks_hidden.py", "practice",
             verbose, no_color, sandbox, "Hidden checks",
+            timeout=timeout,
         )
     else:
         print("No hidden checks in this problem.")
@@ -335,8 +352,10 @@ def _grade_one(
     no_color: bool,
     sandbox: str | None,
     label: str | None,
+    timeout: float | None = None,
+    faculty: bool = False,
 ):
-    from gradbot.compiler import compile_solution
+    from gradbot.compiler import compile_solution, restrict_languages
     from gradbot.loader import LoadError, load_checks
     from gradbot.reporter import render, render_compile_error
     from gradbot.runner import run_suite
@@ -350,10 +369,17 @@ def _grade_one(
         # A broken suite is the author's to fix; say what is wrong, no traceback.
         print(f"❌ {exc}")
         sys.exit(1)
+    if faculty and config.total_points:
+        awarded = sum(check.points for check in checks)
+        if awarded != config.total_points:
+            print(
+                f"⚠️  suite.yaml total_points is {config.total_points} but {checks_filename} "
+                f"awards {awarded}. The score uses the checks."
+            )
     # Compile and run from a private copy: binaries, .class files and
     # __pycache__ never land in the student's folder.
     with staged_solution(solution_dir) as stage:
-        compile_result = compile_solution(stage)
+        compile_result = restrict_languages(compile_solution(stage), config.languages)
         if not compile_result.success:
             render_compile_error(
                 friendly_error=compile_result.friendly_error,
@@ -362,7 +388,7 @@ def _grade_one(
                 no_color=no_color,
             )
         result = run_suite(
-            config, checks, stage, compile_result, mode, sandbox=sandbox,
+            config, checks, stage, compile_result, mode, sandbox=sandbox, default_timeout=timeout,
         )
     render(result, verbose=verbose, no_color=no_color)
     return result
@@ -399,7 +425,7 @@ def _dispatch(argv: list[str]) -> None:
             suite_dir, Path(args.solution).resolve(),
             verbose=args.verbose, no_color=args.no_color,
             faculty_output=args.output, student_output=args.student_output,
-            sandbox=args.sandbox,
+            sandbox=args.sandbox, timeout=args.timeout,
         )
         return
     if cmd == "run":
@@ -425,6 +451,7 @@ def _dispatch(argv: list[str]) -> None:
             suite_dir, Path(args.solution).resolve(),
             verbose=args.verbose, no_color=args.no_color,
             faculty_output=args.output, student_output=args.student_output,
+            timeout=args.timeout,
         )
         return
     if cmd == "submit":
@@ -465,6 +492,7 @@ def _local_parser(name: str) -> argparse.ArgumentParser:
     parser.add_argument("--output", default=None)
     parser.add_argument("--student-output", default=None)
     parser.add_argument("--sandbox", choices=["docker"], default=None)
+    parser.add_argument("--timeout", type=_positive_seconds, default=None)
     return parser
 
 

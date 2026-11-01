@@ -45,6 +45,7 @@ class SuiteResult:
     topic: str                                         # e.g. "Arrays & Strings"
     mode: Mode                                         # practice shows details, submit hides
     checks: list[CheckResult] = field(default_factory=list)
+    general_hint: str | None = None                    # problem-wide hint from suite.yaml
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -91,6 +92,7 @@ class SuiteResult:
             "passed_points": self.passed_points,
             "total_checks": self.total,
             "passed_checks": self.passed,
+            "general_hint": self.general_hint,
             "timestamp": self.timestamp,
             "checks": [asdict(c) for c in self.checks],
         }

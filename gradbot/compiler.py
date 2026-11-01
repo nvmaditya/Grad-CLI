@@ -455,6 +455,30 @@ def _find_java_main_class(solution_dir: Path, source_files: list[Path]) -> str |
     return None
 
 
+_DISPLAY = {"python": "Python", "c": "C", "cpp": "C++", "java": "Java"}
+
+
+def _join(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def restrict_languages(compile_result: CompileResult, allowed: list[str]) -> CompileResult:
+    """Turn a successful build in a language the problem doesn't accept into a failure."""
+    if not compile_result.success or compile_result.language in allowed:
+        return compile_result
+    found = _DISPLAY.get(compile_result.language, compile_result.language)
+    files = ", ".join(compile_result.source_files)
+    return CompileResult(
+        success=False,
+        language=compile_result.language,
+        friendly_error=(
+            f"This problem accepts {_join([_DISPLAY.get(a, a) for a in allowed])}. "
+            f"Your folder has {found} ({files})."
+        ),
+        source_files=compile_result.source_files,
+    )
+
+
 def get_run_command(compile_result: CompileResult) -> list[str]:
     """
     Get the command to run the compiled student solution.

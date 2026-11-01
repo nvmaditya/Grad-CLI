@@ -209,6 +209,8 @@ def render(
     ]
     if failed_with_hints and suite_result.score < 1.0:
         lines.append(c.dim("  Focus on the hints above and try again."))
+    if suite_result.general_hint and suite_result.score < 1.0:
+        lines.append(c.yellow(f"  💡 {suite_result.general_hint}"))
 
     lines.append("")
 

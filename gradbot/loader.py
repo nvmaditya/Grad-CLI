@@ -84,20 +84,21 @@ def check(
 # ── Suite config loading ──────────────────────────────────────────────
 
 
+LANGUAGES = ("python", "c", "cpp", "java")
+LANGUAGE_NAMES = {"python": "Python", "c": "C", "cpp": "C++", "java": "Java"}
+DEFAULT_TIME_LIMIT = 5.0
+
+
 @dataclass
 class SuiteConfig:
     """Parsed suite.yaml configuration."""
 
     name: str = "Unnamed Problem"
     topic: str = "General"
-    difficulty: str = "beginner"
-    description: str = ""
-    languages: list[str] = field(default_factory=lambda: ["python", "c", "cpp", "java"])
-    time_limit: float = 5.0
-    memory_limit_mb: int = 64
-    total_points: int = 0          # 0 means auto-sum from checks
-    pass_threshold: float = 0.6
-    general_hint: str = ""
+    languages: list[str] = field(default_factory=lambda: list(LANGUAGES))
+    time_limit: float = DEFAULT_TIME_LIMIT  # default timeout for gradbot.run()
+    total_points: int = 0          # 0: not stated; dev warns if it disagrees with the checks
+    general_hint: str = ""         # shown when a run misses marks
     raw: dict = field(default_factory=dict)  # the raw yaml dict
 
 
@@ -129,17 +130,31 @@ def load_suite_config(suite_dir: Path) -> SuiteConfig:
     scoring = _section(raw, "scoring", suite_dir)
     hints = _section(raw, "hints", suite_dir)
 
+    languages = problem.get("languages", list(LANGUAGES))
+    if not isinstance(languages, list) or not languages:
+        raise LoadError(f"problem.languages in suite.yaml ({suite_dir}) must be a list, such as [python, c]")
+    unknown = [str(lang) for lang in languages if lang not in LANGUAGES]
+    if unknown:
+        raise LoadError(
+            f"problem.languages in suite.yaml ({suite_dir}) lists {', '.join(unknown)}. "
+            f"GradBot supports {', '.join(LANGUAGES)}."
+        )
+
+    time_limit = problem.get("time_limit", DEFAULT_TIME_LIMIT)
+    if isinstance(time_limit, bool) or not isinstance(time_limit, (int, float)) or time_limit <= 0:
+        raise LoadError(f"problem.time_limit in suite.yaml ({suite_dir}) must be a number of seconds above 0")
+
+    total_points = scoring.get("total_points", 0)
+    if isinstance(total_points, bool) or not isinstance(total_points, int) or total_points < 0:
+        raise LoadError(f"scoring.total_points in suite.yaml ({suite_dir}) must be a whole number >= 0")
+
     return SuiteConfig(
         name=str(problem.get("name", "Unnamed Problem")),
         topic=str(problem.get("topic", "General")),
-        difficulty=problem.get("difficulty", "beginner"),
-        description=problem.get("description", ""),
-        languages=problem.get("languages", ["python", "c", "cpp", "java"]),
-        time_limit=problem.get("time_limit", 5.0),
-        memory_limit_mb=problem.get("memory_limit_mb", 64),
-        total_points=scoring.get("total_points", 0),
-        pass_threshold=scoring.get("pass_threshold", 0.6),
-        general_hint=hints.get("general", ""),
+        languages=list(languages),
+        time_limit=float(time_limit),
+        total_points=total_points,
+        general_hint=str(hints.get("general") or ""),
         raw=raw,
     )
 

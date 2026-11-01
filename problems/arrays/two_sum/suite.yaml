@@ -15,11 +15,9 @@ problem:
       Two space-separated indices (0-indexed)
   languages: [python, c, cpp, java]
   time_limit: 5
-  memory_limit_mb: 64
 
 scoring:
   total_points: 4
-  pass_threshold: 0.6
 
 hints:
   general: "Think about what data structure lets you look up values instantly."
