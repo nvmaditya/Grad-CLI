@@ -69,10 +69,12 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
+      # Deliberately newer than the sandbox image's Java 21 JRE: the Java
+      # container test then fails if GradBot stops compiling for that JRE.
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
       - run: python -m pip install -e ".[dev]"
       - name: Sandbox tests against the runner's Docker daemon
         run: python -m pytest -m docker -v
