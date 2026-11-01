@@ -172,3 +172,18 @@ def test_problem_section_that_is_a_string_is_a_load_error(tmp_path):
 def test_unicode_problem_name(tmp_path):
     (tmp_path / "suite.yaml").write_text('problem:\n  name: "Somme à deux — 两数之和"\n', encoding="utf-8")
     assert load_suite_config(tmp_path).name == "Somme à deux — 两数之和"
+
+
+def test_checks_can_read_data_files_next_to_them(tmp_path):
+    (tmp_path / "expected").mkdir()
+    (tmp_path / "expected" / "large.txt").write_text("42\n", encoding="utf-8")
+    checks = (
+        "from pathlib import Path\n"
+        "import gradbot\n"
+        "EXPECTED = (Path(__file__).parent / 'expected' / 'large.txt').read_text().strip()\n"
+        "@gradbot.check('reads data')\n"
+        "def reads():\n"
+        "    assert EXPECTED == '42'\n"
+    )
+    _, ordered = load_checks(_suite(tmp_path, checks))
+    ordered[0].func()
