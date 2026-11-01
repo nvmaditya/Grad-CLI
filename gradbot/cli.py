@@ -30,6 +30,7 @@ _COMMANDS = {
 
 def main(argv: list[str] | None = None) -> None:
     """Main entry point for the GradBot CLI."""
+    _make_output_unbreakable()
     raw = list(sys.argv[1:] if argv is None else argv)
     if raw and raw[0] in _COMMANDS:
         try:
@@ -62,6 +63,22 @@ def main(argv: list[str] | None = None) -> None:
     except Exception as e:
         _handle_fatal_error(e, verbose=args.verbose)
         sys.exit(1)
+
+
+def _make_output_unbreakable() -> None:
+    """Print ? instead of crashing when the terminal can't encode ✓, ✗ or emoji.
+
+    A Windows console redirected to a file, or LANG=C, gives Python an
+    ASCII or cp1252 stdout. Without this, the first ✓ raises
+    UnicodeEncodeError and the student sees a traceback.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(errors="replace")
+            except (ValueError, OSError):  # closed or unsupported stream
+                pass
 
 
 def _build_parser() -> argparse.ArgumentParser:
