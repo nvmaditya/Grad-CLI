@@ -85,6 +85,57 @@ def test_an_explicit_timeout_in_the_check_wins(tmp_path):
     assert _dev(prob, sol, "--timeout", "0.5") == 0
 
 
+_HANG = "while True:\n    pass\n"
+
+_OUTPUT_ONLY_CHECK = """\
+import gradbot
+
+@gradbot.check("prints done", points=1{check_hint})
+def test_prints_done():
+    gradbot.expect_output(gradbot.run(timeout=0.5).stdout, "done"{call_hint})
+"""
+
+
+def _student_hint(tmp_path: Path, checks: str, solution: str) -> str:
+    prob, sol = _problem(tmp_path, "problem: {}\n", checks, solution)
+    _dev(prob, sol, "--student-output", str(tmp_path / "student.json"))
+    payload = json.loads((tmp_path / "student.json").read_text(encoding="utf-8"))
+    return payload["public"]["checks"][0]["hint"]
+
+
+def test_a_timed_out_program_is_told_about_the_time_limit(tmp_path):
+    checks = _OUTPUT_ONLY_CHECK.format(check_hint=', hint="Print done."', call_hint="")
+    assert _student_hint(tmp_path, checks, _HANG) == (
+        "Your program was stopped at the 0.5-second time limit. Print done."
+    )
+
+
+def test_a_timed_out_program_without_a_check_hint_gets_the_time_limit_hint(tmp_path):
+    checks = _OUTPUT_ONLY_CHECK.format(check_hint="", call_hint="")
+    assert _student_hint(tmp_path, checks, _HANG) == (
+        "Your program was stopped at the 0.5-second time limit. "
+        "Look for a loop that never ends, or a step that is too slow."
+    )
+
+
+def test_a_hint_on_the_failing_call_still_wins_after_a_timeout(tmp_path):
+    checks = _OUTPUT_ONLY_CHECK.format(check_hint=', hint="Print done."', call_hint=', hint="Say done"')
+    assert _student_hint(tmp_path, checks, _HANG) == "Say done"
+
+
+def test_a_wrong_answer_that_finished_keeps_the_check_hint(tmp_path):
+    checks = _OUTPUT_ONLY_CHECK.format(check_hint=', hint="Print done."', call_hint="")
+    assert _student_hint(tmp_path, checks, "print('nope')\n") == "Print done."
+
+
+def test_the_faculty_cause_says_the_program_timed_out(tmp_path):
+    checks = _OUTPUT_ONLY_CHECK.format(check_hint="", call_hint="")
+    prob, sol = _problem(tmp_path, "problem: {}\n", checks, _HANG)
+    _dev(prob, sol, "--output", str(tmp_path / "faculty.json"))
+    check = json.loads((tmp_path / "faculty.json").read_text(encoding="utf-8"))["public"]["checks"][0]
+    assert check["cause"] == "Timed out after 0.5 s. Expected 'done', got ''"
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "fast"])
 def test_bad_time_limit_is_a_load_error(tmp_path, value):
     (tmp_path / "suite.yaml").write_text(f"problem:\n  time_limit: {value}\n", encoding="utf-8")

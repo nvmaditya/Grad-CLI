@@ -114,6 +114,12 @@ def run_suite(
     )
 
 
+def _time_limit_hint(limit: float, check_hint: str | None) -> str:
+    """Hint for a check that failed after its program was stopped at the time limit."""
+    advice = check_hint or "Look for a loop that never ends, or a step that is too slow."
+    return f"Your program was stopped at the {limit:g}-second time limit. {advice}"
+
+
 def _run_single_check(
     check: CheckFunction,
     solution_dir: Path,
@@ -183,6 +189,13 @@ def _run_single_check(
                 # The hint passed to the failing call, then the check's own
                 # hint, then the generic one for that kind of failure.
                 hint = e.hint or check.hint or e.default_hint or "Try reviewing your approach!"
+                cause = str(e)
+                limit = api.timed_out_after()
+                if limit is not None:
+                    # An output mismatch after a timeout is really a timeout.
+                    cause = f"Timed out after {limit:g} s. {cause}"
+                    if not e.hint:
+                        hint = _time_limit_hint(limit, check.hint)
 
                 log_lines.append(f"CheckFailure: {e}")
                 if hasattr(e, "expected") and e.expected is not None:
@@ -196,7 +209,7 @@ def _run_single_check(
                     status="fail",
                     description=check.name,
                     hint=hint,
-                    cause=str(e),
+                    cause=cause,
                     duration_ms=elapsed_ms,
                     points=check.points,
                     log=log_lines,
@@ -208,6 +221,11 @@ def _run_single_check(
                 # The assert message can contain the expected answer, so it
                 # goes to cause (faculty only), never to the hint.
                 hint = check.hint or "One of the assertions in this check failed."
+                cause = str(e) or "Assertion failed"
+                limit = api.timed_out_after()
+                if limit is not None:
+                    cause = f"Timed out after {limit:g} s. {cause}"
+                    hint = _time_limit_hint(limit, check.hint)
                 log_lines.append(f"AssertionError: {e}")
 
                 return CheckResult(
@@ -216,7 +234,7 @@ def _run_single_check(
                     status="fail",
                     description=check.name,
                     hint=hint,
-                    cause=str(e) or "Assertion failed",
+                    cause=cause,
                     duration_ms=elapsed_ms,
                     points=check.points,
                     log=log_lines,

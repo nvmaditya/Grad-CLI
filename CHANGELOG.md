@@ -37,6 +37,9 @@ lists the test that covers each feature.
 - The CLI crashed with a traceback on a terminal that could not print ✓.
 - `--timeout`, `time_limit`, `languages` and `hints.general` were parsed
   and ignored. They now work as documented.
+- A program stopped at the time limit was reported as a wrong answer, with
+  nothing telling the student it ran out of time. The hint now starts with
+  the time limit, and the faculty result says the run timed out.
 - The Docker sandbox passed host paths into the container and never
   forwarded stdin, and a timed-out container kept running.
 - The grader workflow written by `grade publish` had no Python setup or

@@ -91,6 +91,11 @@ def _get_context():
     }
 
 
+def timed_out_after() -> float | None:
+    """The time limit, in seconds, of a run in the current check that was stopped, else None."""
+    return getattr(_context, "timed_out_after", None)
+
+
 def set_context(
     solution_dir: Path,
     run_command: list[str],
@@ -106,6 +111,7 @@ def set_context(
     _context.sandbox = sandbox
     _context.default_timeout = default_timeout
     _context.image = image
+    _context.timed_out_after = None
 
 
 def clear_context() -> None:
@@ -116,6 +122,7 @@ def clear_context() -> None:
     _context.sandbox = None
     _context.default_timeout = None
     _context.image = None
+    _context.timed_out_after = None
 
 
 # ── Public API functions ──────────────────────────────────────────────
@@ -188,6 +195,8 @@ def run(input: str = "", timeout: float | None = None, args: list[str] | None = 
         if container:
             # Killing the docker client leaves the container running.
             kill(container)
+        # The runner tells the student about the time limit if the check fails.
+        _context.timed_out_after = timeout
         return RunResult(
             stdout=_as_text(e.stdout),
             stderr=_as_text(e.stderr),

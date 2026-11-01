@@ -93,7 +93,7 @@ with `input` on stdin and returns a `RunResult`:
 |---|---|
 | `stdout`, `stderr` | Text, decoded as UTF-8. Bytes that are not UTF-8 become `�` instead of crashing the check. |
 | `exit_code` | The process exit code, or `-1` after a timeout. |
-| `timed_out` | `True` if the program was stopped at the time limit. Output printed before that is kept. |
+| `timed_out` | `True` if the program was stopped at the time limit. Output printed before that is kept. If the check then fails and the failing call has no `hint=`, the student's hint starts with the time limit, followed by the check's hint. |
 
 Each check gets a fresh copy of the solution folder, so a program that writes
 files cannot affect the next check. The program does not see environment
