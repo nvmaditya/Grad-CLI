@@ -17,6 +17,7 @@ via stdin pipe, which is sufficient for DSA problems.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import threading
@@ -147,9 +148,14 @@ def run(input: str = "", timeout: float = 5.0, args: list[str] | None = None) ->
             full_cmd,
             input=input,
             capture_output=True,
-            text=True,
+            # Decode as UTF-8 whatever the locale is, and never raise on
+            # bytes that aren't UTF-8: a garbled answer is a wrong answer,
+            # not a grader crash.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             cwd=str(work_dir),
+            env=_child_env(),
         )
         return RunResult(
             stdout=result.stdout,
@@ -294,6 +300,23 @@ def expect_sequence(
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
+
+
+# Variable names containing any of these never reach the student program.
+# Faculty run `grade dev` on untrusted code with GRADBOT_APP_TOKEN exported.
+_SECRET_NAME_PARTS = ("TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "API_KEY", "PRIVATE_KEY")
+
+
+def _child_env() -> dict[str, str]:
+    """Environment for the student program: no secrets, UTF-8 stdio, no bytecode files."""
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not any(part in name.upper() for part in _SECRET_NAME_PARTS)
+    }
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
 
 
 def _as_text(data: str | bytes | None) -> str:

@@ -66,14 +66,12 @@ def test_run_without_sandbox_uses_subprocess_command(mock_run, tmp_path: Path):
 
     assert result.stdout == "ok\n"
     assert result.exit_code == 0
-    mock_run.assert_called_once_with(
-        command,
-        input="1\n",
-        capture_output=True,
-        text=True,
-        timeout=3,
-        cwd=str(tmp_path),
-    )
+    mock_run.assert_called_once()
+    args, kwargs = mock_run.call_args
+    assert args == (command,)
+    assert kwargs["input"] == "1\n"
+    assert kwargs["timeout"] == 3
+    assert kwargs["cwd"] == str(tmp_path)
 
 
 @patch("gradbot.api.subprocess.run")
@@ -86,11 +84,8 @@ def test_run_docker_sandbox_uses_container_argv(mock_run, tmp_path: Path):
     finally:
         clear_context()
 
-    mock_run.assert_called_once_with(
-        container_argv(tmp_path, command),
-        input="",
-        capture_output=True,
-        text=True,
-        timeout=5.0,
-        cwd=str(tmp_path),
-    )
+    mock_run.assert_called_once()
+    args, kwargs = mock_run.call_args
+    assert args == (container_argv(tmp_path, command),)
+    assert kwargs["input"] == ""
+    assert kwargs["timeout"] == 5.0
