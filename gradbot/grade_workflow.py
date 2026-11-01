@@ -1,5 +1,5 @@
-# Grade CLI — course grade workflow for a free GitHub organization.
-# Copyright (C) 2026 Grade CLI contributors
+# GradBot — course grade workflow for a free GitHub organization.
+# Copyright (C) 2026 Aditya Khandelwal
 # SPDX-License-Identifier: GPL-3.0-only
 
 """Workflow text for a grade that runs in the course repository."""

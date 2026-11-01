@@ -26,7 +26,7 @@ _ALLOWED_EXTENSIONS = {".py", ".c", ".h", ".cpp", ".cc", ".hpp", ".java"}
 
 # Where the grader installs GradBot from. Override per course with the
 # repository variable GRADBOT_PIP_SPEC (for example a fork or a commit).
-INSTALL_SPEC = f"grade-cli @ git+https://github.com/nvmaditya/gradbot@v{__version__}"
+INSTALL_SPEC = f"gradbot @ git+https://github.com/nvmaditya/gradbot@v{__version__}"
 
 # Inputs reach the shell only through env, never as ${{ inputs.* }} inside
 # run:, so a crafted slug cannot inject commands. Checkouts do not persist

@@ -30,7 +30,7 @@ def _run(*argv: str) -> int:
 
 
 def _no_crash(out: str) -> None:
-    assert "bug in Grade" not in out
+    assert "unexpected problem" not in out
     assert "Traceback" not in out
 
 

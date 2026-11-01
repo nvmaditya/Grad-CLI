@@ -22,21 +22,31 @@ from gradbot import __version__, config
 from gradbot.errors import UserError
 from gradbot.result import Mode
 
-_COMMANDS = {
-    "login", "run", "submit", "dev", "publish", "results", "reset", "roster",
-    "course", "assignment",
-}
+_COMMANDS_HELP = """\
+commands:
+  grade run TOPIC/PROBLEM          practise against the public checks
+  grade dev PROBLEM_DIR            faculty: public checks, then hidden checks
+  grade publish PROBLEM_DIR ...    faculty: split into tests and samples repos
+  grade login                      sign in with GitHub (for graded submits)
+  grade submit TOPIC/PROBLEM       the one graded submit, sent to the course App
+  grade roster add LOGIN           faculty: enrol a student by GitHub id
+  grade reset LOGIN TOPIC/PROBLEM  faculty: give a student one more submit
+  grade results FILE               print a result without hidden detail
+  grade course | assignment ...    classroom files (preview)
+
+Run grade COMMAND --help for the options of each command.
+"""
 
 
 def main(argv: list[str] | None = None) -> None:
     """Main entry point for the GradBot CLI."""
     _make_output_unbreakable()
     raw = list(sys.argv[1:] if argv is None else argv)
-    if raw and raw[0] in _COMMANDS:
+    if raw and raw[0] in _HANDLERS:
         try:
             _dispatch(raw)
         except KeyboardInterrupt:
-            print("\n\nGrade cancelled. See you next time! 👋")
+            print("\n\nGradBot cancelled. See you next time! 👋")
             sys.exit(130)
         except SystemExit:
             raise
@@ -59,7 +69,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         _run(args)
     except KeyboardInterrupt:
-        print("\n\nGrade cancelled. See you next time! 👋")
+        print("\n\nGradBot cancelled. See you next time! 👋")
         sys.exit(130)
     except SystemExit:
         raise
@@ -102,19 +112,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="grade",
         description=(
-            "Grade CLI — check a solution on a free GitHub organization.\n\n"
-            "Example: grade practice/arrays/two_sum"
+            "GradBot — check a solution against a problem's checks.\n\n"
+            "Example: grade run arrays/two_sum"
         ),
+        epilog=_COMMANDS_HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     parser.add_argument(
         "slug",
         help=(
-            "Problem identifier. Format: {practice|submit}/{topic}/{problem}\n"
-            "Examples:\n"
-            "  practice/arrays/two_sum    — practice mode with public tests\n"
-            "  submit/trees/inorder       — submit mode with hidden tests"
+            "practice/{topic}/{problem}[@ref], or with --dev a problem folder.\n"
+            "Same as `grade run` and `grade dev`, kept for older scripts."
         ),
     )
 
@@ -183,7 +192,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"Grade CLI {__version__}",
+        version=f"GradBot {__version__}",
     )
 
     return parser
@@ -256,8 +265,8 @@ def _run(args: argparse.Namespace) -> None:
 
 def _handle_fatal_error(error: Exception, verbose: bool = False) -> None:
     """Handle unexpected errors gracefully — never show raw tracebacks to students."""
-    print("\n❌ Oops! Grade ran into an unexpected problem.")
-    print("   This isn't your fault — it's a bug in Grade.")
+    print("\n❌ Oops! GradBot ran into an unexpected problem.")
+    print("   This isn't your fault — it's a bug in GradBot.")
     print("   Please tell your teacher what happened.\n")
 
     if verbose:
@@ -407,88 +416,69 @@ def _write_views(public, hidden, faculty_output, student_output) -> None:
 
 
 def _dispatch(argv: list[str]) -> None:
-    cmd = argv[0]
-    if cmd == "dev":
-        args = _local_parser("dev").parse_args(argv[1:])
-        _require_solution(Path(args.solution))
-        from gradbot.fetcher import FetchError, fetch_local
-        try:
-            suite_dir = fetch_local(Path(args.path).resolve())
-        except FetchError as exc:
-            print(f"❌ {exc}")
-            sys.exit(1)
-        grade_dev(
-            suite_dir, Path(args.solution).resolve(),
-            verbose=args.verbose, no_color=args.no_color,
-            faculty_output=args.output, student_output=args.student_output,
-            sandbox=args.sandbox, timeout=args.timeout,
-        )
-        return
-    if cmd == "run":
-        args = _local_parser("run").parse_args(argv[1:])
-        _require_solution(Path(args.solution))
-        slug = args.path
-        if slug.startswith("submit/"):
-            print("❌ gradbot run is practice only. Hidden tests are not on this computer.")
-            sys.exit(1)
-        if not slug.startswith("practice/"):
-            slug = f"practice/{slug}"
-        from gradbot.fetcher import FetchError, fetch
-        from gradbot.git import GitError, ensure_git_installed
-        from gradbot.resolver import SlugError, resolve
-        try:
-            ensure_git_installed()
-            resolved = resolve(slug)
-            suite_dir = fetch(resolved, offline=args.offline)
-        except (GitError, SlugError, FetchError) as exc:
-            print(f"❌ {exc}")
-            sys.exit(1)
-        grade_student(
-            suite_dir, Path(args.solution).resolve(),
-            verbose=args.verbose, no_color=args.no_color,
-            faculty_output=args.output, student_output=args.student_output,
-            timeout=args.timeout,
-        )
-        return
-    if cmd == "submit":
-        _cmd_submit(argv[1:])
-        return
-    if cmd == "login":
-        _cmd_login(argv[1:])
-        return
-    if cmd == "publish":
-        _cmd_publish(argv[1:])
-        return
-    if cmd == "results":
-        _cmd_results(argv[1:])
-        return
-    if cmd == "reset":
-        _cmd_reset(argv[1:])
-        return
-    if cmd == "roster":
-        _cmd_roster(argv[1:])
-        return
-    if cmd == "course":
-        _cmd_course(argv[1:])
-        return
-    if cmd == "assignment":
-        _cmd_assignment(argv[1:])
-        return
-    print(f"❌ Unknown command {cmd}")
-    sys.exit(2)
+    _HANDLERS[argv[0]](argv[1:])
+
+
+def _cmd_dev(argv: list[str]) -> None:
+    from gradbot.fetcher import fetch_local
+
+    args = _local_parser("dev").parse_args(argv)
+    _require_solution(Path(args.solution))
+    suite_dir = fetch_local(Path(args.path))
+    grade_dev(
+        suite_dir, Path(args.solution).resolve(),
+        verbose=args.verbose, no_color=args.no_color,
+        faculty_output=args.output, student_output=args.student_output,
+        sandbox=args.sandbox, timeout=args.timeout,
+    )
+
+
+def _cmd_run(argv: list[str]) -> None:
+    from gradbot.fetcher import fetch
+    from gradbot.git import ensure_git_installed
+    from gradbot.resolver import resolve
+
+    args = _local_parser("run").parse_args(argv)
+    _require_solution(Path(args.solution))
+    slug = args.path
+    if slug.startswith("submit/"):
+        print("❌ grade run is practice only. Hidden tests are not on this computer.")
+        sys.exit(1)
+    if not slug.startswith("practice/"):
+        slug = f"practice/{slug}"
+    ensure_git_installed()
+    suite_dir = fetch(resolve(slug), offline=args.offline)
+    grade_student(
+        suite_dir, Path(args.solution).resolve(),
+        verbose=args.verbose, no_color=args.no_color,
+        faculty_output=args.output, student_output=args.student_output,
+        timeout=args.timeout,
+    )
 
 
 def _local_parser(name: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=f"gradbot {name}")
-    parser.add_argument("path" if name != "run" else "path", help="Problem directory or slug")
-    parser.add_argument("--solution", default=".")
-    parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--no-color", action="store_true")
-    parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--output", default=None)
-    parser.add_argument("--student-output", default=None)
-    parser.add_argument("--sandbox", choices=["docker"], default=None)
-    parser.add_argument("--timeout", type=_positive_seconds, default=None)
+    parser = argparse.ArgumentParser(prog=f"grade {name}")
+    if name == "run":
+        parser.add_argument("path", metavar="topic/problem[@ref]", help="Problem in the public samples repo")
+        parser.add_argument("--offline", action="store_true", help="Use the copy downloaded earlier")
+    else:
+        parser.add_argument("path", metavar="PROBLEM_DIR", help="Folder with suite.yaml and checks.py")
+        parser.add_argument(
+            "--sandbox", choices=["docker"], default=None,
+            help="Run the program in Docker with no network (Linux; used by the grader)",
+        )
+    parser.add_argument("--solution", default=".", metavar="DIR", help="Solution folder (default: .)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show expected output and logs")
+    parser.add_argument("--no-color", action="store_true", help="Plain output")
+    parser.add_argument("--output", default=None, metavar="FILE", help="Write the full JSON result")
+    parser.add_argument(
+        "--student-output", default=None, metavar="FILE",
+        help="Write the JSON result without expected output",
+    )
+    parser.add_argument(
+        "--timeout", type=_positive_seconds, default=None, metavar="SECONDS",
+        help="Time limit per program run (default: suite.yaml time_limit, else 5)",
+    )
     return parser
 
 
@@ -641,3 +631,17 @@ def _cmd_roster(argv: list[str]) -> None:
     args = parser.parse_args(argv)
     remote.roster_add(config.load(), args.login, Path(args.roster))
     sys.exit(0)
+
+
+_HANDLERS = {
+    "run": _cmd_run,
+    "dev": _cmd_dev,
+    "publish": _cmd_publish,
+    "login": _cmd_login,
+    "submit": _cmd_submit,
+    "roster": _cmd_roster,
+    "reset": _cmd_reset,
+    "results": _cmd_results,
+    "course": _cmd_course,
+    "assignment": _cmd_assignment,
+}

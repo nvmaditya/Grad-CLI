@@ -70,7 +70,7 @@ def student(tmp_path: Path) -> Path:
 
 
 def test_version_and_help(tmp_path, env):
-    assert grade("--version", cwd=tmp_path, env=env).stdout.strip() == "Grade CLI 1.0.0"
+    assert grade("--version", cwd=tmp_path, env=env).stdout.strip() == "GradBot 1.0.0"
     assert grade("--help", cwd=tmp_path, env=env).returncode == 0
 
 
@@ -85,7 +85,7 @@ def test_python_module_entry_point(tmp_path, env):
         [sys.executable, "-m", "gradbot", "--version"], cwd=tmp_path, env=env,
         capture_output=True, text=True,
     )
-    assert done.stdout.strip() == "Grade CLI 1.0.0"
+    assert done.stdout.strip() == "GradBot 1.0.0"
 
 
 # ── student practice ──────────────────────────────────────────────────

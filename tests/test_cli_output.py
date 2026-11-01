@@ -73,4 +73,4 @@ def test_fatal_error_message_survives_an_ascii_stdout(monkeypatch):
     sys.stdout.flush()
 
     assert exc.value.code == 1
-    assert b"Grade ran into an unexpected problem" in raw.getvalue()
+    assert b"GradBot ran into an unexpected problem" in raw.getvalue()

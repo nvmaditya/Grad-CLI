@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "grade-cli"
+name = "gradbot"
 dynamic = ["version"]
 description = "Autograder for programming courses on a free GitHub organization. Hidden checks never reach the student."
 readme = "README.md"

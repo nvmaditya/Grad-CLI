@@ -5,4 +5,4 @@ from __future__ import annotations
 
 
 class UserError(Exception):
-    """The CLI prints the message and exits 1. No traceback, no "bug in Grade"."""
+    """The CLI prints the message and exits 1. No traceback, no "bug in GradBot"."""

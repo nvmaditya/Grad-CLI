@@ -162,7 +162,7 @@ def test_broken_checks_file_is_reported_without_blaming_the_student(tmp_path: Pa
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "Error importing checks.py" in out
-    assert "bug in Grade" not in out
+    assert "unexpected problem" not in out
 
 
 def test_malformed_suite_yaml_is_reported_cleanly(tmp_path: Path, capsys):
@@ -173,7 +173,7 @@ def test_malformed_suite_yaml_is_reported_cleanly(tmp_path: Path, capsys):
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "suite.yaml" in out
-    assert "bug in Grade" not in out
+    assert "unexpected problem" not in out
 
 
 def test_malformed_practice_repo_setting_names_the_variable(tmp_path: Path, capsys, monkeypatch):
@@ -184,4 +184,4 @@ def test_malformed_practice_repo_setting_names_the_variable(tmp_path: Path, caps
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "GRADBOT_PUBLIC_REPO is 'not a repo'" in out
-    assert "bug in Grade" not in out
+    assert "unexpected problem" not in out
