@@ -66,6 +66,9 @@ markers = [
 [tool.coverage.run]
 source = ["gradbot"]
 branch = true
+# Also measure the `grade` subprocesses the end-to-end tests start.
+patch = ["subprocess"]
+parallel = true
 
 [tool.coverage.report]
 show_missing = true

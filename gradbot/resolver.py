@@ -76,11 +76,6 @@ class ResolvedSlug:
         """Relative path within the repo to the problem directory."""
         return f"{self.topic}/{self.problem}"
 
-    @property
-    def cache_key(self) -> str:
-        """Unique key for identifying this resolved slug."""
-        return f"{self.mode}/{self.topic}/{self.problem}/{self.ref}"
-
 
 def parse_slug(slug: str) -> dict:
     """

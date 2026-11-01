@@ -155,20 +155,6 @@ def device_code_body(client_id: str) -> dict:
     return {"client_id": client_id, "scope": "read:user"}
 
 
-def student_can_read_private_repo(scope: str) -> bool:
-    return "repo" in scope.split()
-
-
-def credential_for(repo_role: str, student_token: str, app_token: str) -> str:
-    """Tests and submissions are read with the App token, never the student token."""
-    del student_token
-    if repo_role != "tests":
-        raise PolicyError(f"unknown repo role {repo_role}")
-    if not app_token:
-        raise PolicyError("tests repo requires the App token")
-    return app_token
-
-
 def _roster_rows(text: str) -> list[dict]:
     """The students list of roster.yml. Every row needs a numeric id."""
     try:

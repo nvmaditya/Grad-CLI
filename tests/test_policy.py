@@ -13,7 +13,6 @@ from gradbot.policy import (
     PolicyError,
     accept_zip,
     add_roster_entry,
-    credential_for,
     device_code_body,
     install_grader_workflow,
     parse_roster,
@@ -22,7 +21,6 @@ from gradbot.policy import (
     safe_source_files,
     slot_ref,
     status_comment,
-    student_can_read_private_repo,
     submit_once,
 )
 from gradbot.result import CheckResult, SuiteResult
@@ -259,13 +257,9 @@ def test_zip_keeps_source_only():
     assert files == {"solution.py": b"print(1)\n"}
 
 
-def test_student_token_cannot_read_tests():
-    body = device_code_body("course-client")
-    assert body["scope"] == "read:user"
-    assert student_can_read_private_repo(body["scope"]) is False
-    assert credential_for("tests", student_token="stu", app_token="app") == "app"
-    with pytest.raises(PolicyError):
-        credential_for("tests", student_token="stu", app_token="")
+def test_student_login_asks_only_for_read_user():
+    # read:user proves who the student is and cannot read a private repo.
+    assert device_code_body("course-client") == {"client_id": "course-client", "scope": "read:user"}
 
 
 def test_publish_hides_checks_and_workflow_from_samples(tmp_path: Path):

@@ -84,9 +84,8 @@ class TestResolve:
         resolved = resolve("practice/arrays/two_sum")
         assert resolved.git_origin == "https://github.com/myorg/myrepo.git"
 
-    def test_cache_key_includes_ref(self):
-        resolved = resolve("practice/arrays/two_sum@v2")
-        assert resolved.cache_key == "practice/arrays/two_sum/v2"
+    def test_ref_is_kept(self):
+        assert resolve("practice/arrays/two_sum@v2").ref == "v2"
 
     def test_problem_path(self):
         resolved = resolve("practice/arrays/two_sum")
