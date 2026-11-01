@@ -70,6 +70,7 @@ jobs:
         run: python -m pip install "$GRADBOT_PIP_SPEC"
 
       - name: Grade
+        continue-on-error: true
         env:
           GRADE_APP_TOKEN: ""
           GITHUB_TOKEN: ""
@@ -78,4 +79,9 @@ jobs:
         run: |
           case "$SLUG" in *..*) echo "refusing a path with .."; exit 1;; esac
           python -m gradbot dev "course/$SLUG" --solution submission --sandbox docker --output faculty.json --student-output student.json
+
+      - name: Check that grading finished
+        # The Grade step may fail because the student's program did; that is
+        # a finished grade. A missing student.json means the grader itself broke.
+        run: test -f student.json || { echo "::error::grading did not finish; see the Grade step"; exit 1; }
 """

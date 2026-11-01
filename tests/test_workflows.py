@@ -82,6 +82,17 @@ def test_publish_workflow_keeps_results_even_when_grading_fails():
     assert steps["Keep the results"]["if"] == "always()"
 
 
+@pytest.mark.parametrize("name", TEMPLATES)
+def test_a_broken_grader_still_fails_the_job(name):
+    """A failing student is a finished grade; a grader that never wrote student.json is not."""
+    steps = _steps(TEMPLATES[name])
+    order = list(steps)
+    check = steps["Check that grading finished"]
+    assert order.index("Grade") + 1 == order.index("Check that grading finished")
+    assert "continue-on-error" not in check
+    assert check["run"].startswith("test -f student.json")
+
+
 def test_install_spec_pins_this_version():
     import gradbot
 
@@ -129,6 +140,8 @@ def test_publish_grade_step_runs_for_real(tmp_path):
     )
 
     assert done.returncode == 0, done.stdout + done.stderr
+    finished = _steps(WORKFLOW_TEXT)["Check that grading finished"]["run"]
+    assert subprocess.run(["bash", "-c", finished], cwd=workspace).returncode == 0
     student = json.loads((workspace / "student.json").read_text(encoding="utf-8"))
     assert student["public"]["passed_points"] == 1
     assert student["hidden"]["passed_points"] == 1

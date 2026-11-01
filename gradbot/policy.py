@@ -100,6 +100,11 @@ jobs:
           # checks_hidden.py stays in this process and is not mounted into the container.
           python -m gradbot dev "tests/$SLUG" --solution "submission/$SUBMISSION_PATH" --sandbox docker --output faculty.json --student-output student.json
 
+      - name: Check that grading finished
+        # The Grade step may fail because the student's program did; that is
+        # a finished grade. A missing student.json means the grader itself broke.
+        run: test -f student.json || { echo "::error::grading did not finish; see the Grade step"; exit 1; }
+
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@v4
