@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from gradbot import __version__
 from gradbot.errors import UserError
 from gradbot.loader import public_bundle_files
 from gradbot.result import SuiteResult
@@ -23,6 +24,14 @@ from gradbot.visibility import student_payload
 MAX_ZIP_BYTES = 1_048_576
 _ALLOWED_EXTENSIONS = {".py", ".c", ".h", ".cpp", ".cc", ".hpp", ".java"}
 
+# Where the grader installs GradBot from. Override per course with the
+# repository variable GRADBOT_PIP_SPEC (for example a fork or a commit).
+INSTALL_SPEC = f"grade-cli @ git+https://github.com/nvmaditya/gradbot@v{__version__}"
+
+# Inputs reach the shell only through env, never as ${{ inputs.* }} inside
+# run:, so a crafted slug cannot inject commands. Checkouts do not persist
+# credentials, and the grade step clears every token before the student
+# program starts.
 WORKFLOW_TEXT = """\
 name: grade
 
@@ -30,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       slug:
-        description: Problem slug
+        description: Problem slug, such as arrays/two_sum
         required: true
         type: string
       user_id:
@@ -58,6 +67,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: tests
+          persist-credentials: false
 
       - name: Check out the submission
         uses: actions/checkout@v4
@@ -65,16 +75,41 @@ jobs:
           repository: ${{ vars.GRADBOT_SUBMISSIONS_REPO }}
           token: ${{ secrets.GRADBOT_APP_TOKEN }}
           path: submission
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GradBot
+        env:
+          GRADBOT_PIP_SPEC: ${{ vars.GRADBOT_PIP_SPEC || '@INSTALL_SPEC@' }}
+        run: python -m pip install "$GRADBOT_PIP_SPEC"
 
       - name: Grade
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ""
-          GRADBOT_SANDBOX: docker
+          GRADBOT_APP_TOKEN: ""
+          SLUG: ${{ inputs.slug }}
+          SUBMISSION_PATH: ${{ inputs.submission_path }}
         run: |
+          case "$SLUG/$SUBMISSION_PATH" in *..*) echo "refusing a path with .."; exit 1;; esac
           # docker run --rm --network none mounts only the solution directory.
           # checks_hidden.py stays in this process and is not mounted into the container.
-          python -m gradbot dev "tests/${{ inputs.slug }}" --solution "submission/${{ inputs.submission_path }}" --sandbox docker --output faculty.json --student-output student.json
-"""
+          python -m gradbot dev "tests/$SLUG" --solution "submission/$SUBMISSION_PATH" --sandbox docker --output faculty.json --student-output student.json
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grade-${{ inputs.user_id }}-${{ github.run_id }}
+          path: |
+            faculty.json
+            student.json
+          if-no-files-found: warn
+""".replace("@INSTALL_SPEC@", INSTALL_SPEC)
 
 
 class PolicyError(UserError):

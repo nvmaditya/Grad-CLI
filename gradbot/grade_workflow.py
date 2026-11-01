@@ -6,9 +6,14 @@
 
 from __future__ import annotations
 
+from gradbot.policy import INSTALL_SPEC
+
 
 def grade_workflow_text() -> str:
-    return """\
+    return _TEXT.replace("@INSTALL_SPEC@", INSTALL_SPEC)
+
+
+_TEXT = """\
 name: grade
 
 on:
@@ -43,6 +48,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: course
+          persist-credentials: false
 
       - name: Check out the student commit
         uses: actions/checkout@v4
@@ -51,11 +57,25 @@ jobs:
           ref: ${{ inputs.sha }}
           token: ${{ secrets.GRADE_APP_TOKEN }}
           path: submission
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GradBot
+        env:
+          GRADBOT_PIP_SPEC: ${{ vars.GRADBOT_PIP_SPEC || '@INSTALL_SPEC@' }}
+        run: python -m pip install "$GRADBOT_PIP_SPEC"
 
       - name: Grade
         env:
           GRADE_APP_TOKEN: ""
           GITHUB_TOKEN: ""
           GRADBOT_APP_TOKEN: ""
-        run: python -m gradbot dev "course/${{ inputs.slug }}" --solution submission --sandbox docker --output faculty.json --student-output student.json
+          SLUG: ${{ inputs.slug }}
+        run: |
+          case "$SLUG" in *..*) echo "refusing a path with .."; exit 1;; esac
+          python -m gradbot dev "course/$SLUG" --solution submission --sandbox docker --output faculty.json --student-output student.json
 """
