@@ -7,6 +7,7 @@ stubs that exist on PATH and fail when run without a JDK installed.
 from __future__ import annotations
 
 import functools
+import os
 import shutil
 import subprocess
 
@@ -39,6 +40,17 @@ def has_jdk() -> bool:
 def has_docker() -> bool:
     return works("docker", "info")
 
+
+# CI sets GRADBOT_REQUIRE_TOOLCHAINS=gcc,g++,jdk (or docker) so a runner that
+# lost a toolchain fails loudly instead of skipping those tests and going green.
+_PROBES = {"gcc": has_gcc, "g++": has_gxx, "jdk": has_jdk, "docker": has_docker}
+_REQUIRED = [n for n in os.environ.get("GRADBOT_REQUIRE_TOOLCHAINS", "").split(",") if n.strip()]
+_unknown = [n for n in _REQUIRED if n not in _PROBES]
+_missing = [n for n in _REQUIRED if n in _PROBES and not _PROBES[n]()]
+if _unknown or _missing:
+    raise RuntimeError(
+        f"GRADBOT_REQUIRE_TOOLCHAINS: unknown {_unknown}, not working here {_missing}"
+    )
 
 needs_gcc = pytest.mark.skipif(not has_gcc(), reason="gcc is not available")
 needs_gxx = pytest.mark.skipif(not has_gxx(), reason="g++ is not available")
