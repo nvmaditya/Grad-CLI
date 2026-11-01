@@ -65,13 +65,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out hidden tests
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: tests
           persist-credentials: false
 
       - name: Check out the submission
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ vars.GRADBOT_SUBMISSIONS_REPO }}
           token: ${{ secrets.GRADBOT_APP_TOKEN }}
@@ -79,7 +79,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -108,7 +108,7 @@ jobs:
 
       - name: Keep the results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: grade-${{ inputs.user_id }}-${{ github.run_id }}
           path: |

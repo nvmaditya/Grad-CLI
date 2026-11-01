@@ -31,6 +31,26 @@ def _trigger(text: str) -> dict:
     return data.get("on") or data[True]  # PyYAML reads the key `on` as True
 
 
+# The first major of each action that runs on Node 24. GitHub deprecated the
+# Node 20 runtime; CI run #1 on harden warned about every older major below.
+_NODE24_MAJOR = {
+    "actions/checkout": 5,
+    "actions/setup-python": 6,
+    "actions/setup-java": 5,
+    "actions/upload-artifact": 6,
+}
+_CI = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "ci.yml"
+
+
+@pytest.mark.parametrize("name", [*TEMPLATES, "ci"])
+def test_every_action_is_a_node24_major(name):
+    text = _CI.read_text(encoding="utf-8") if name == "ci" else TEMPLATES[name]
+    uses = re.findall(r"uses:\s*(\S+)@v(\d+)", text)
+    assert uses
+    old = [f"{action}@v{major}" for action, major in uses if int(major) < _NODE24_MAJOR[action]]
+    assert old == []
+
+
 @pytest.mark.parametrize("name", TEMPLATES)
 def test_workflow_is_dispatch_only(name):
     assert set(_trigger(TEMPLATES[name])) == {"workflow_dispatch"}

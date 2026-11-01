@@ -45,13 +45,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out the course
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: course
           persist-credentials: false
 
       - name: Check out the student commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.repository }}
           ref: ${{ inputs.sha }}
@@ -60,7 +60,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
