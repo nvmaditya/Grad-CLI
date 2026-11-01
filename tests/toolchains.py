@@ -50,3 +50,14 @@ needs_docker = [
     pytest.mark.docker,
     pytest.mark.skipif(not has_docker(), reason="no working Docker daemon"),
 ]
+
+
+def with_marks(marks: list):
+    """Apply a list of marks as one decorator."""
+
+    def decorate(func):
+        for mark in marks:
+            func = mark(func)
+        return func
+
+    return decorate

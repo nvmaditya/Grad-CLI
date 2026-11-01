@@ -1,10 +1,17 @@
 """Sandbox argv and optional docker execution. No Docker daemon required."""
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from gradbot.api import _get_context, clear_context, run, set_context
-from gradbot.sandbox import container_argv
+from gradbot.compiler import CompileResult, compile_solution
+from gradbot.errors import UserError
+from gradbot.loader import CheckFunction, SuiteConfig
+from gradbot.runner import run_suite
+from gradbot.sandbox import IMAGES, container_argv, ensure_image
 
 
 def test_container_argv_is_networkless_and_mounts_only_work(tmp_path: Path):
@@ -86,6 +93,123 @@ def test_run_docker_sandbox_uses_container_argv(mock_run, tmp_path: Path):
 
     mock_run.assert_called_once()
     args, kwargs = mock_run.call_args
-    assert args == (container_argv(tmp_path, command),)
+    argv = args[0]
+    name = argv[argv.index("--name") + 1]
+    assert name.startswith("gradbot-")
+    assert argv == container_argv(tmp_path, command, name=name)
     assert kwargs["input"] == ""
     assert kwargs["timeout"] == 5.0
+
+
+# ── the command that reaches Docker (no daemon needed) ────────────────
+
+
+def _docker_argv(tmp_path, compile_result, monkeypatch, timeout=False):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if timeout and cmd[:2] == ["docker", "run"]:
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"), output=b"", stderr=b"")
+        return MagicMock(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr("gradbot.api.subprocess.run", fake_run)
+
+    def check():
+        import gradbot
+        gradbot.run(input="4\n")
+
+    run_suite(
+        SuiteConfig(name="T", topic="T"),
+        [CheckFunction(func=check, name="c", slug="c")],
+        tmp_path,
+        compile_result,
+        "practice",
+        sandbox="docker",
+    )
+    return calls
+
+
+def _after_image(argv: list[str], image: str) -> list[str]:
+    return argv[argv.index(image) + 1 :]
+
+
+def test_docker_python_command_uses_container_paths(tmp_path, monkeypatch):
+    (tmp_path / "solution.py").write_text("print(input())\n", encoding="utf-8")
+    argv = _docker_argv(tmp_path, compile_solution(tmp_path), monkeypatch)[0]
+
+    assert _after_image(argv, IMAGES["python"]) == ["python", "/work/solution.py"]
+    assert str(tmp_path) not in " ".join(_after_image(argv, IMAGES["python"]))
+
+
+def test_docker_forwards_stdin(tmp_path, monkeypatch):
+    (tmp_path / "solution.py").write_text("print(input())\n", encoding="utf-8")
+    argv = _docker_argv(tmp_path, compile_solution(tmp_path), monkeypatch)[0]
+    assert "-i" in argv[: argv.index(IMAGES["python"])]
+
+
+def test_docker_c_binary_runs_from_work(tmp_path, monkeypatch):
+    (tmp_path / "solution").write_bytes(b"\x7fELF")
+    result = CompileResult(success=True, language="c", binary_path=str(tmp_path / "solution"))
+    argv = _docker_argv(tmp_path, result, monkeypatch)[0]
+    assert _after_image(argv, IMAGES["c"]) == ["/work/solution"]
+
+
+def test_docker_java_runs_the_class_from_work(tmp_path, monkeypatch):
+    (tmp_path / "Solution.class").write_bytes(b"\xca\xfe")
+    result = CompileResult(success=True, language="java", binary_path="Solution")
+    argv = _docker_argv(tmp_path, result, monkeypatch)[0]
+    assert _after_image(argv, IMAGES["java"]) == ["java", "-cp", "/work", "Solution"]
+
+
+def test_docker_limits_and_privileges(tmp_path, monkeypatch):
+    (tmp_path / "solution.py").write_text("print(1)\n", encoding="utf-8")
+    argv = _docker_argv(tmp_path, compile_solution(tmp_path), monkeypatch)[0]
+    head = argv[: argv.index(IMAGES["python"])]
+    assert head[head.index("--network") + 1] == "none"
+    assert "--memory" in head and "--pids-limit" in head
+    assert "no-new-privileges" in head
+
+
+def test_docker_timeout_kills_the_container(tmp_path, monkeypatch):
+    (tmp_path / "solution.py").write_text("while True: pass\n", encoding="utf-8")
+    calls = _docker_argv(tmp_path, compile_solution(tmp_path), monkeypatch, timeout=True)
+    name = calls[0][calls[0].index("--name") + 1]
+    assert calls[1] == ["docker", "kill", name]
+
+
+def test_ensure_image_pulls_only_when_missing(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return MagicMock(returncode=1 if cmd[1] == "image" else 0, stdout="", stderr="")
+
+    monkeypatch.setattr("gradbot.sandbox.subprocess.run", fake_run)
+    ensure_image("python:3.12-slim")
+    assert calls == [
+        ["docker", "image", "inspect", "python:3.12-slim"],
+        ["docker", "pull", "python:3.12-slim"],
+    ]
+
+
+def test_ensure_image_without_docker_is_a_clear_error(monkeypatch):
+    def missing(cmd, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr("gradbot.sandbox.subprocess.run", missing)
+    with pytest.raises(UserError, match="needs Docker"):
+        ensure_image("python:3.12-slim")
+
+
+def test_docker_mode_links_c_statically(tmp_path, monkeypatch):
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(list(cmd))
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    (tmp_path / "solution.c").write_text("int main(void){return 0;}\n", encoding="utf-8")
+    monkeypatch.setattr("gradbot.compiler.subprocess.run", fake_run)
+    compile_solution(tmp_path, static=True)
+    assert "-static" in seen[0]

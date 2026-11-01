@@ -16,6 +16,7 @@ from gradbot import api
 from gradbot.compiler import CompileResult, get_run_command, restrict_languages
 from gradbot.loader import CheckFunction, SuiteConfig
 from gradbot.result import CheckResult, Mode, SuiteResult
+from gradbot.sandbox import IMAGES, container_command
 from gradbot.workspace import copy_solution
 
 
@@ -143,6 +144,14 @@ def _run_single_check(
                 run_command, solution_dir, work_dir, compile_result
             )
 
+            image = None
+            if sandbox == "docker" and adjusted_cmd:
+                # Inside the container the files are at /work, not at the host path.
+                adjusted_cmd = container_command(
+                    compile_result.language, Path(adjusted_cmd[-1]).name,
+                )
+                image = IMAGES[compile_result.language]
+
             # Set up the API context so run(), expect_output(), etc. work
             api.set_context(
                 solution_dir=solution_dir,
@@ -150,6 +159,7 @@ def _run_single_check(
                 work_dir=work_dir,
                 sandbox=sandbox,
                 default_timeout=timeout,
+                image=image,
             )
 
             try:

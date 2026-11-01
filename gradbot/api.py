@@ -21,11 +21,12 @@ import os
 import re
 import subprocess
 import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from gradbot.sandbox import container_argv
+from gradbot.sandbox import IMAGES, container_argv, kill
 
 
 class CheckFailure(Exception):
@@ -86,6 +87,7 @@ def _get_context():
         "work_dir": getattr(_context, "work_dir", None),
         "sandbox": getattr(_context, "sandbox", None),
         "default_timeout": getattr(_context, "default_timeout", None),
+        "image": getattr(_context, "image", None),
     }
 
 
@@ -95,6 +97,7 @@ def set_context(
     work_dir: Path,
     sandbox: str | None = None,
     default_timeout: float | None = None,
+    image: str | None = None,
 ) -> None:
     """Set the context for the current check. Called by runner.py."""
     _context.solution_dir = solution_dir
@@ -102,6 +105,7 @@ def set_context(
     _context.work_dir = work_dir
     _context.sandbox = sandbox
     _context.default_timeout = default_timeout
+    _context.image = image
 
 
 def clear_context() -> None:
@@ -111,6 +115,7 @@ def clear_context() -> None:
     _context.work_dir = None
     _context.sandbox = None
     _context.default_timeout = None
+    _context.image = None
 
 
 # ── Public API functions ──────────────────────────────────────────────
@@ -152,8 +157,12 @@ def run(input: str = "", timeout: float | None = None, args: list[str] | None = 
     full_cmd = list(cmd)
     if args:
         full_cmd.extend(args)
+    container = None
     if ctx["sandbox"] == "docker":
-        full_cmd = container_argv(Path(work_dir), full_cmd)
+        container = f"gradbot-{uuid.uuid4().hex[:12]}"
+        full_cmd = container_argv(
+            Path(work_dir), full_cmd, image=ctx["image"] or IMAGES["python"], name=container,
+        )
 
     try:
         result = subprocess.run(
@@ -176,6 +185,9 @@ def run(input: str = "", timeout: float | None = None, args: list[str] | None = 
             timed_out=False,
         )
     except subprocess.TimeoutExpired as e:
+        if container:
+            # Killing the docker client leaves the container running.
+            kill(container)
         return RunResult(
             stdout=_as_text(e.stdout),
             stderr=_as_text(e.stderr),

@@ -152,13 +152,16 @@ def _extract_friendly_error(raw_error: str, language: str) -> str:
         )
 
 
-def compile_solution(solution_dir: Path, language: str | None = None) -> CompileResult:
+def compile_solution(
+    solution_dir: Path, language: str | None = None, static: bool = False,
+) -> CompileResult:
     """
     Compile the student's solution.
 
     Args:
         solution_dir: Path to the directory containing the student's code
         language: Override language detection (if None, auto-detect)
+        static: Link C/C++ statically (for running in a Docker image; Linux only)
 
     Returns:
         CompileResult with success status, binary path, and error info
@@ -195,9 +198,9 @@ def compile_solution(solution_dir: Path, language: str | None = None) -> Compile
     if language == "python":
         return _compile_python(solution_dir, source_files, source_names)
     elif language == "c":
-        return _compile_c(solution_dir, source_files, source_names)
+        return _compile_c(solution_dir, source_files, source_names, static)
     elif language == "cpp":
-        return _compile_cpp(solution_dir, source_files, source_names)
+        return _compile_cpp(solution_dir, source_files, source_names, static)
     elif language == "java":
         return _compile_java(solution_dir, source_files, source_names)
     else:
@@ -273,7 +276,7 @@ def _compile_python(
 
 
 def _compile_c(
-    solution_dir: Path, source_files: list[Path], source_names: list[str]
+    solution_dir: Path, source_files: list[Path], source_names: list[str], static: bool = False
 ) -> CompileResult:
     """Compile C files using gcc."""
     output_binary = solution_dir / "solution"
@@ -285,6 +288,7 @@ def _compile_c(
         *[str(f) for f in source_files],
         "-o", str(output_binary),
         "-lm",
+        *(["-static"] if static else []),
     ]
 
     try:
@@ -332,7 +336,7 @@ def _compile_c(
 
 
 def _compile_cpp(
-    solution_dir: Path, source_files: list[Path], source_names: list[str]
+    solution_dir: Path, source_files: list[Path], source_names: list[str], static: bool = False
 ) -> CompileResult:
     """Compile C++ files using g++."""
     output_binary = solution_dir / "solution"
@@ -344,6 +348,7 @@ def _compile_cpp(
         *[str(f) for f in source_files],
         "-o", str(output_binary),
         "-std=c++17",
+        *(["-static"] if static else []),
     ]
 
     try:

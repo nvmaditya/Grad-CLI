@@ -350,6 +350,7 @@ def _grade_one(
     from gradbot.loader import LoadError, load_checks
     from gradbot.reporter import render, render_compile_error
     from gradbot.runner import run_suite
+    from gradbot.sandbox import IMAGES, ensure_image
     from gradbot.workspace import staged_solution
 
     if label:
@@ -370,7 +371,11 @@ def _grade_one(
     # Compile and run from a private copy: binaries, .class files and
     # __pycache__ never land in the student's folder.
     with staged_solution(solution_dir) as stage:
-        compile_result = restrict_languages(compile_solution(stage), config.languages)
+        compile_result = restrict_languages(
+            compile_solution(stage, static=sandbox == "docker"), config.languages,
+        )
+        if sandbox == "docker" and compile_result.success:
+            ensure_image(IMAGES[compile_result.language])
         if not compile_result.success:
             render_compile_error(
                 friendly_error=compile_result.friendly_error,
