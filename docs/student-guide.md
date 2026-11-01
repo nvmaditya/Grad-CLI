@@ -6,7 +6,10 @@ teacher.
 
 ## Install
 
-You need Python 3.10 or newer and Git.
+You need Git and Python 3.10 or newer. Check with `python3 --version`: the
+`python3` that ships with macOS is 3.9, so install a newer one from
+python.org or Homebrew. An older Python stops the install with
+"requires a different Python".
 
 ```bash
 git clone https://github.com/nvmaditya/gradbot

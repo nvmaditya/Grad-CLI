@@ -85,7 +85,9 @@ and the course App that receives submits is yours to deploy. Details are in
 
 ## Quickstart
 
-macOS or Linux, with Python 3.10+ and Git:
+macOS or Linux, with Git and Python 3.10 or newer (check `python3 --version`;
+the `python3` that ships with macOS is 3.9, so use one from python.org or
+Homebrew):
 
 ```bash
 git clone https://github.com/nvmaditya/gradbot && cd gradbot
